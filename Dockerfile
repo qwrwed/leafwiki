@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Step 1: Frontend
 FROM node:26-alpine@sha256:725aeba2364a9b16beae49e180d83bd597dbd0b15c47f1f28875c290bfd255b9 AS frontend-build
 WORKDIR /app
@@ -13,10 +14,13 @@ WORKDIR /app
 ARG APP_VERSION
 ARG DISABLE_REFRESH_TOKEN_RATE_LIMIT=false
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+	go mod download
 COPY . .
 COPY --from=frontend-build /app/dist ./internal/http/dist
-RUN CGO_ENABLED=0 go build \
+RUN --mount=type=cache,target=/go/pkg/mod \
+	--mount=type=cache,target=/root/.cache/go-build \
+	CGO_ENABLED=0 go build \
 	-ldflags="-s -w -X github.com/perber/wiki/internal/http.EmbedFrontend=true -X github.com/perber/wiki/internal/http.Environment=production -X main.Version=${APP_VERSION} -X github.com/perber/wiki/internal/wiki/auth.DisableRefreshTokenRateLimit=${DISABLE_REFRESH_TOKEN_RATE_LIMIT}" \
 	-o /out/leafwiki ./cmd/leafwiki
 
