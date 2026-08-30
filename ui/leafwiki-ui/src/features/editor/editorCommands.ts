@@ -92,6 +92,24 @@ export function replaceFilenameInText(
   )
 }
 
+// Wraps the current selection in a `:::collapsed <title>` / `:::` block and
+// selects the title text, so typing immediately replaces it.
+export function insertCollapsibleBlock(view: EditorView, title: string) {
+  const { from, to } = view.state.selection.main
+  const selected = view.state.doc.sliceString(from, to)
+  const before = `:::collapsed ${title}\n`
+  const after = '\n:::'
+  const insertText = `${before}${selected}${after}`
+  const titleStart = from + ':::collapsed '.length
+  const titleEnd = titleStart + title.length
+
+  view.dispatch({
+    changes: { from, to, insert: insertText },
+    selection: { anchor: titleStart, head: titleEnd },
+  })
+  view.focus()
+}
+
 // Inserts a heading of the specified level (1, 2, or 3) at the current line at the start position
 export function insertHeadingAtStart(view: EditorView, level: 1 | 2 | 3) {
   const { from } = view.state.selection.main

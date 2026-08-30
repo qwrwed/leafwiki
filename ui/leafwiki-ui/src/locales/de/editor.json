@@ -38,6 +38,8 @@
     "tableSizeLabel": "{{col}} × {{row}}",
     "tableInsertAriaLabel": "Tabelle {{col}} x {{row}} einfügen",
     "codeBlockTooltip": "Codeblock",
+    "collapsibleTooltip": "Eingeklappter Abschnitt",
+    "collapsible": "Eingeklappter Abschnitt",
     "inlineCodeTooltip": "Inline-Code (Strg+`)",
     "imageTooltip": "Bild / Datei",
     "undoTooltip": "Rückgängig",

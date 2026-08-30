@@ -36,6 +36,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useEditorStore } from '@/stores/editor'
 import { useUserSettingsStore } from '@/stores/userSettings'
+import { CollapsibleSectionIcon } from './CollapsibleSectionIcon'
 import { MarkdownEditorRef } from './MarkdownEditor'
 
 type Props = {
@@ -341,6 +342,25 @@ export default function MarkdownToolbar({
             <Code2 className="markdown-toolbar__icon" />
           </Button>
         </TooltipWrapper>
+        {!isMobile && (
+          <TooltipWrapper
+            label={t('toolbar.collapsibleTooltip')}
+            side="top"
+            align="center"
+          >
+            <Button
+              variant="ghost"
+              size="icon"
+              className="markdown-toolbar__button"
+              data-testid="format-collapsible-button"
+              onClick={() =>
+                editorRef.current?.insertCollapsibleBlock('Click to expand')
+              }
+            >
+              <CollapsibleSectionIcon className="markdown-toolbar__icon" />
+            </Button>
+          </TooltipWrapper>
+        )}
         <TooltipWrapper
           label={t('toolbar.imageTooltip')}
           side="top"
@@ -507,6 +527,14 @@ export default function MarkdownToolbar({
               >
                 <Table size={14} />
                 {t('toolbar.insertTable')}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() =>
+                  editorRef.current?.insertCollapsibleBlock('Click to expand')
+                }
+              >
+                <CollapsibleSectionIcon size={14} />
+                {t('toolbar.collapsible')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => editorRef.current?.pasteRich()}>

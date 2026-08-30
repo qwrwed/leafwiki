@@ -19,6 +19,7 @@ import MarkdownPreview from '../preview/MarkdownPreview'
 import MarkdownCodeEditor from './MarkdownCodeEditor'
 import MarkdownToolbar from './MarkdownToolbar'
 import {
+  insertCollapsibleBlock,
   insertHeadingAtStart,
   insertWrappedText,
   replaceFilenameInText,
@@ -40,6 +41,7 @@ export type MarkdownEditorRef = {
   getMarkdown: () => string
   insertWrappedText: (before: string, after?: string) => void
   insertHeading: (level: 1 | 2 | 3) => void
+  insertCollapsibleBlock: (title: string) => void
   replaceSelection: (text: string) => void
   replaceFilenameInMarkdown?: (before: string, after: string) => void
   editorViewRef: React.RefObject<EditorView | null>
@@ -389,6 +391,15 @@ const MarkdownEditor = (
       const view = editorViewRef.current
       if (!view) return
       insertHeadingAtStart(view, level)
+      const newDoc = view.state.doc.toString()
+      setMarkdown(newDoc)
+      onChange(newDoc)
+      editorViewRef.current?.focus()
+    },
+    insertCollapsibleBlock: (title: string) => {
+      const view = editorViewRef.current
+      if (!view) return
+      insertCollapsibleBlock(view, title)
       const newDoc = view.state.doc.toString()
       setMarkdown(newDoc)
       onChange(newDoc)
