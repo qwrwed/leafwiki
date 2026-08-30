@@ -232,6 +232,9 @@
       "insertLink": {
         "action": "Insert link"
       },
+      "toggleLineWrap": {
+        "action": "Toggle line wrap"
+      },
       "backToPage": {
         "action": "Back to page"
       },

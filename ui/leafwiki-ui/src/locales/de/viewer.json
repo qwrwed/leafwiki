@@ -232,6 +232,9 @@
       "insertLink": {
         "action": "Link einfügen"
       },
+      "toggleLineWrap": {
+        "action": "Zeilenumbruch umschalten"
+      },
       "backToPage": {
         "action": "Zurück zur Seite"
       },

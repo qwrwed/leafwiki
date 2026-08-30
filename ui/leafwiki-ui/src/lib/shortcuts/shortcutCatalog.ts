@@ -25,6 +25,7 @@ export type ShortcutId =
   | 'editor.heading.three'
   | 'editor.format.inlineCode'
   | 'editor.link.insert'
+  | 'editor.lineWrap.toggle'
   | 'history.page.close'
   | 'settings.exit'
   | 'asset.rename.confirm'
@@ -257,6 +258,16 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     keyCombo: 'Mod+KeyK',
     defaultDisplayLabel: 'Ctrl+K',
     macDisplayLabel: 'Cmd+K',
+    modes: ['edit'],
+    customizable: true,
+  },
+  {
+    id: 'editor.lineWrap.toggle',
+    labelKey: 'shortcutsHelp.items.toggleLineWrap.action',
+    categoryKey: 'shortcutsHelp.categories.editing',
+    keyCombo: 'Alt+KeyZ',
+    defaultDisplayLabel: 'Alt+Z',
+    macDisplayLabel: 'Option+Z',
     modes: ['edit'],
     customizable: true,
   },

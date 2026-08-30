@@ -15,6 +15,7 @@ import { Save, X, Cloud } from 'lucide-react'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useUserSettingsStore } from '@/stores/userSettings'
+import { useEditorStore } from '@/stores/editor'
 import { useIsMobile } from '@/lib/useIsMobile'
 import { type ToolbarButton, useToolbarStore } from '../toolbar/toolbarStore'
 import { usePageEditorStore } from './pageEditorStore'
@@ -53,6 +54,7 @@ export function useToolbarActions({
   const dirty = usePageEditorStore(isDirtyState)
   const autoSave = useUserSettingsStore((s) => s.autoSave)
   const toggleAutoSave = useUserSettingsStore((s) => s.toggleAutoSave)
+  const toggleLineWrap = useEditorStore((s) => s.toggleLineWrap)
   const isMacOS =
     typeof navigator !== 'undefined' &&
     /Mac|iPhone|iPad|iPod/.test(navigator.platform)
@@ -195,6 +197,11 @@ export function useToolbarActions({
       openLinkDialog,
     )
 
+    const lineWrapHotkey: HotKeyDefinition = createHotkeyDefinition(
+      'editor.lineWrap.toggle',
+      toggleLineWrap,
+    )
+
     registerHotkey(saveHotKey)
     registerHotkey(closeHotkey)
     registerHotkey(boldHotkey)
@@ -204,6 +211,7 @@ export function useToolbarActions({
     registerHotkey(heading3Hotkey)
     registerHotkey(inlineCodeHotkey)
     registerHotkey(linkHotkey)
+    registerHotkey(lineWrapHotkey)
 
     return () => {
       unregisterHotkey(saveHotKey.keyCombo)
@@ -215,6 +223,7 @@ export function useToolbarActions({
       unregisterHotkey(heading3Hotkey.keyCombo)
       unregisterHotkey(inlineCodeHotkey.keyCombo)
       unregisterHotkey(linkHotkey.keyCombo)
+      unregisterHotkey(lineWrapHotkey.keyCombo)
     }
   }, [
     appMode,
@@ -232,5 +241,6 @@ export function useToolbarActions({
     unregisterHotkey,
     dirty,
     isMacOS,
+    toggleLineWrap,
   ])
 }
