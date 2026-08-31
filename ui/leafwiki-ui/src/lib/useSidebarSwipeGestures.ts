@@ -2,15 +2,15 @@ import { useIsMobile } from '@/lib/useIsMobile'
 import { useSidebarStore } from '@/stores/sidebar'
 import { useEffect, useRef } from 'react'
 
-// how close to the left edge a touch must start to be considered an edge swipe
+// how close to the left edge a touch must start to be considered an edge swipe (open only)
 const EDGE_ZONE_WIDTH = 24
-// how far right the touch must travel before we open the sidebar
-const OPEN_THRESHOLD = 60
+// how far the touch must travel before we open/close the sidebar
+const SWIPE_THRESHOLD = 60
 // if vertical movement exceeds this before the horizontal threshold is hit,
 // treat it as a scroll instead of a swipe
 const VERTICAL_CANCEL_THRESHOLD = 30
 
-export function useSwipeToOpenSidebar() {
+export function useSidebarSwipeGestures() {
   const isMobile = useIsMobile()
   const sidebarVisible = useSidebarStore((s) => s.sidebarVisible)
   const setSidebarVisible = useSidebarStore((s) => s.setSidebarVisible)
@@ -20,11 +20,15 @@ export function useSwipeToOpenSidebar() {
   const startYRef = useRef(0)
 
   useEffect(() => {
-    if (!isMobile || sidebarVisible) return
+    if (!isMobile) return
 
     const onTouchStart = (e: TouchEvent) => {
       const touch = e.touches[0]
-      if (!touch || touch.clientX > EDGE_ZONE_WIDTH) return
+      if (!touch) return
+
+      // closed: only track touches starting in the left edge zone
+      // open: track touches starting anywhere (closing swipe)
+      if (!sidebarVisible && touch.clientX > EDGE_ZONE_WIDTH) return
 
       trackingRef.current = true
       startXRef.current = touch.clientX
@@ -45,9 +49,12 @@ export function useSwipeToOpenSidebar() {
         return
       }
 
-      if (deltaX > OPEN_THRESHOLD) {
+      if (!sidebarVisible && deltaX > SWIPE_THRESHOLD) {
         trackingRef.current = false
         setSidebarVisible(true)
+      } else if (sidebarVisible && deltaX < -SWIPE_THRESHOLD) {
+        trackingRef.current = false
+        setSidebarVisible(false)
       }
     }
 

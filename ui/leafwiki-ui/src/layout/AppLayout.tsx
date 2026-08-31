@@ -15,7 +15,7 @@ import { withBasePath } from '@/lib/routePath'
 import { useAppMode } from '@/lib/useAppMode'
 import { useAutoCloseSidebarOnMobile } from '@/lib/useAutoCloseSidebarOnMobile'
 import { useIsMobile } from '@/lib/useIsMobile'
-import { useSwipeToOpenSidebar } from '@/lib/useSwipeToOpenSidebar'
+import { useSidebarSwipeGestures } from '@/lib/useSidebarSwipeGestures'
 import { cn } from '@/lib/utils'
 import { useBrandingStore } from '@/stores/branding'
 import {
@@ -55,7 +55,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const sidebarVisibleBeforePrintRef = useRef<boolean | null>(null)
 
   useAutoCloseSidebarOnMobile()
-  useSwipeToOpenSidebar()
+  useSidebarSwipeGestures()
 
   const { siteName, logoFile, logoVersion } = useBrandingStore()
 
