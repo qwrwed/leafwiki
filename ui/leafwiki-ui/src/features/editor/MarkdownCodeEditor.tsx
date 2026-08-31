@@ -17,7 +17,11 @@ import { EditorView, keymap } from '@codemirror/view'
 import { githubLight } from '@fsegurai/codemirror-theme-github-light'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useDesignModeStore } from '../designtoggle/designmode'
-import { insertHeadingAtStart, insertWrappedText } from './editorCommands'
+import {
+  autoSurroundSelection,
+  insertHeadingAtStart,
+  insertWrappedText,
+} from './editorCommands'
 import type { InternalLinkCompletion } from './internalLinkCompletion'
 import {
   internalLinkCompletionSource,
@@ -256,6 +260,14 @@ export default function MarkdownCodeEditor({
           // toolbar buttons while it's being tested. Plain Ctrl/Cmd+V and file
           // pastes fall through to CodeMirror's default handling / the outer
           // React onPaste handler (asset upload).
+          keydown(event, view) {
+            if (event.ctrlKey || event.metaKey || event.altKey) return false
+            if (autoSurroundSelection(view, event.key)) {
+              event.preventDefault()
+              return true
+            }
+            return false
+          },
         }),
         updateListener,
         EditorView.theme({

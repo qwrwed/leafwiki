@@ -65,6 +65,32 @@ export function insertWrappedText(
   view.focus()
 }
 
+// Matches VS Code's default auto-surround pairs, minus <> (Markdown uses
+// bare < and > too often for autocompletion links/raw HTML to make sense).
+export const AUTO_SURROUND_PAIRS: Record<string, [string, string]> = {
+  '(': ['(', ')'],
+  '[': ['[', ']'],
+  '{': ['{', '}'],
+  "'": ["'", "'"],
+  '"': ['"', '"'],
+  '`': ['`', '`'],
+}
+
+// If the view has a non-empty selection and `key` is one of the surround
+// trigger characters, wraps the selection in the matching pair and returns
+// true (caller should preventDefault). Otherwise returns false and leaves
+// the view untouched, so the caller falls through to normal typing.
+export function autoSurroundSelection(view: EditorView, key: string) {
+  const pair = AUTO_SURROUND_PAIRS[key]
+  if (!pair) return false
+
+  const { from, to } = view.state.selection.main
+  if (from === to) return false
+
+  insertWrappedText(view, pair[0], pair[1])
+  return true
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
