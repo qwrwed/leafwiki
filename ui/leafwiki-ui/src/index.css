@@ -1841,6 +1841,7 @@
   .markdown-editor__preview blockquote > :first-child:is(ul, ol) > li:first-child > :first-child:is(ul, ol) > li:first-child::before,
   .page-history__preview-body blockquote > :first-child:is(ul, ol) > li:first-child > :first-child:is(ul, ol) > li:first-child::before {
     content: open-quote;
+    margin-inline-start: -0.4em;
   }
 
   .page-viewer__content blockquote > :last-child:not(ul):not(ol)::after,
@@ -1853,6 +1854,7 @@
   .markdown-editor__preview blockquote > :last-child:is(ul, ol) > li:last-child > :last-child:is(ul, ol) > li:last-child::after,
   .page-history__preview-body blockquote > :last-child:is(ul, ol) > li:last-child > :last-child:is(ul, ol) > li:last-child::after {
     content: close-quote;
+    margin-inline-end: -0.4em;
   }
 
   .page-viewer__content :where(h2),
