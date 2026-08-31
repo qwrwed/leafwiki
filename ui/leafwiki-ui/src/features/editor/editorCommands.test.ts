@@ -70,6 +70,7 @@ describe('autoSurroundSelection', () => {
     ['"', '"', '"'],
     ['`', '`', '`'],
     ['~', '~', '~'],
+    ['<', '<', '>'],
   ])('wraps the selection when the key is %s', (key, before, after) => {
     const view = makeView('hello world', 0, 5)
     const handled = autoSurroundSelection(view, key)
@@ -94,9 +95,8 @@ describe('autoSurroundSelection', () => {
     expect(view.state.doc.toString()).toBe('(`hello`) world')
   })
 
-  it('does nothing for < and > (excluded from auto-surround)', () => {
+  it('does nothing for > (only the opening bracket triggers surround)', () => {
     const view = makeView('hello world', 0, 5)
-    expect(autoSurroundSelection(view, '<')).toBe(false)
     expect(autoSurroundSelection(view, '>')).toBe(false)
     expect(view.state.doc.toString()).toBe('hello world')
   })

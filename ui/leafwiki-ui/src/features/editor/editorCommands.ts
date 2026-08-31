@@ -65,12 +65,12 @@ export function insertWrappedText(
   view.focus()
 }
 
-// Matches VS Code's default auto-surround pairs, minus <> (Markdown uses
-// bare < and > too often for autocompletion links/raw HTML to make sense).
+// Matches VS Code's default auto-surround pairs.
 export const AUTO_SURROUND_PAIRS: Record<string, [string, string]> = {
   '(': ['(', ')'],
   '[': ['[', ']'],
   '{': ['{', '}'],
+  '<': ['<', '>'],
   "'": ["'", "'"],
   '"': ['"', '"'],
   '`': ['`', '`'],
