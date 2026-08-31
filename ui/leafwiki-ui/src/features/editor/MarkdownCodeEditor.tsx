@@ -15,6 +15,7 @@ import { Compartment, EditorState } from '@codemirror/state'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { EditorView, keymap } from '@codemirror/view'
 import { githubLight } from '@fsegurai/codemirror-theme-github-light'
+import { Strikethrough } from '@lezer/markdown'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useDesignModeStore } from '../designtoggle/designmode'
 import {
@@ -215,7 +216,7 @@ export default function MarkdownCodeEditor({
       extensions: [
         themeCompartment.of(designMode === 'light' ? githubLight : oneDark),
         lineWrapCompartment.of(lineWrap ? wrapExtensions : noWrapExtensions),
-        markdown(),
+        markdown({ extensions: [Strikethrough] }),
         search({
           top: true,
         }),
