@@ -77,6 +77,61 @@ export const AUTO_SURROUND_PAIRS: Record<string, [string, string]> = {
   '~': ['~', '~'],
 }
 
+// Prepends "> " to every line touched by the current selection (or just the
+// cursor's line, if the selection is empty). Reselects the whole prepended
+// block afterwards, so pressing `>` again nests another quote level.
+export function blockquoteSelectedLines(view: EditorView) {
+  const { from, to } = view.state.selection.main
+  let firstLine = view.state.doc.lineAt(from)
+  let lastLine = view.state.doc.lineAt(to)
+  // If the selection starts exactly at the end of the previous line, nothing
+  // in that line is actually selected (can happen with a bottom-to-top drag
+  // that resolves its endpoint to the prior line's last position) — don't
+  // count it as touched.
+  if (from !== to && from === firstLine.to) {
+    firstLine = view.state.doc.lineAt(from + 1)
+  }
+  // If the selection ends exactly at the start of a line, nothing in that
+  // line is actually selected (common with a trailing newline, or a
+  // Shift+Down-style selection) — don't count it as touched.
+  if (from !== to && to === lastLine.from) {
+    lastLine = view.state.doc.lineAt(to - 1)
+  }
+  // Degenerate case: both adjustments fired (e.g. the selection spans just
+  // a single line break) — fall back to the line the selection started on.
+  if (firstLine.number > lastLine.number) {
+    firstLine = view.state.doc.lineAt(from)
+    lastLine = firstLine
+  }
+
+  const changes = []
+  for (let n = firstLine.number; n <= lastLine.number; n++) {
+    const line = view.state.doc.line(n)
+    changes.push({ from: line.from, to: line.from, insert: '> ' })
+  }
+  const linesTouched = lastLine.number - firstLine.number + 1
+
+  view.dispatch({
+    changes,
+    selection: { anchor: firstLine.from, head: lastLine.to + linesTouched * 2 },
+  })
+  view.focus()
+}
+
+// If the selection is non-empty and starts at the beginning of its line,
+// typing `>` blockquotes every touched line instead of just typing `>` at
+// that position. Returns true (caller should preventDefault) if it fired.
+export function autoBlockquoteSelection(view: EditorView, key: string) {
+  if (key !== '>') return false
+
+  const { from, to } = view.state.selection.main
+  if (from === to) return false
+  if (view.state.doc.lineAt(from).from !== from) return false
+
+  blockquoteSelectedLines(view)
+  return true
+}
+
 // If the view has a non-empty selection and `key` is one of the surround
 // trigger characters, wraps the selection in the matching pair and returns
 // true (caller should preventDefault). Otherwise returns false and leaves

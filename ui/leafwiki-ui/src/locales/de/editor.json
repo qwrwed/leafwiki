@@ -40,6 +40,8 @@
     "codeBlockTooltip": "Codeblock",
     "collapsibleTooltip": "Eingeklappter Abschnitt",
     "collapsible": "Eingeklappter Abschnitt",
+    "blockquoteTooltip": "Blockzitat",
+    "blockquote": "Blockzitat",
     "inlineCodeTooltip": "Inline-Code (Strg+`)",
     "imageTooltip": "Bild / Datei",
     "undoTooltip": "Rückgängig",

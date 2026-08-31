@@ -36,6 +36,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useEditorStore } from '@/stores/editor'
 import { useUserSettingsStore } from '@/stores/userSettings'
+import { BlockquoteIcon } from './BlockquoteIcon'
 import { CollapsibleSectionIcon } from './CollapsibleSectionIcon'
 import { MarkdownEditorRef } from './MarkdownEditor'
 
@@ -361,6 +362,23 @@ export default function MarkdownToolbar({
             </Button>
           </TooltipWrapper>
         )}
+        {!isMobile && (
+          <TooltipWrapper
+            label={t('toolbar.blockquoteTooltip')}
+            side="top"
+            align="center"
+          >
+            <Button
+              variant="ghost"
+              size="icon"
+              className="markdown-toolbar__button"
+              data-testid="format-blockquote-button"
+              onClick={() => editorRef.current?.insertBlockquote()}
+            >
+              <BlockquoteIcon className="markdown-toolbar__icon" />
+            </Button>
+          </TooltipWrapper>
+        )}
         <TooltipWrapper
           label={t('toolbar.imageTooltip')}
           side="top"
@@ -535,6 +553,12 @@ export default function MarkdownToolbar({
               >
                 <CollapsibleSectionIcon size={14} />
                 {t('toolbar.collapsible')}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => editorRef.current?.insertBlockquote()}
+              >
+                <BlockquoteIcon size={14} />
+                {t('toolbar.blockquote')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => editorRef.current?.pasteRich()}>

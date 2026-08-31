@@ -18,6 +18,7 @@ import { githubLight } from '@fsegurai/codemirror-theme-github-light'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useDesignModeStore } from '../designtoggle/designmode'
 import {
+  autoBlockquoteSelection,
   autoSurroundSelection,
   insertHeadingAtStart,
   insertWrappedText,
@@ -262,7 +263,10 @@ export default function MarkdownCodeEditor({
           // React onPaste handler (asset upload).
           keydown(event, view) {
             if (event.ctrlKey || event.metaKey || event.altKey) return false
-            if (autoSurroundSelection(view, event.key)) {
+            if (
+              autoBlockquoteSelection(view, event.key) ||
+              autoSurroundSelection(view, event.key)
+            ) {
               event.preventDefault()
               return true
             }
