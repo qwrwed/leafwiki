@@ -69,11 +69,29 @@ describe('autoSurroundSelection', () => {
     ["'", "'", "'"],
     ['"', '"', '"'],
     ['`', '`', '`'],
+    ['~', '~', '~'],
   ])('wraps the selection when the key is %s', (key, before, after) => {
     const view = makeView('hello world', 0, 5)
     const handled = autoSurroundSelection(view, key)
     expect(handled).toBe(true)
     expect(view.state.doc.toString()).toBe(`${before}hello${after} world`)
+  })
+
+  it('keeps the original text selected so another surround character nests', () => {
+    const view = makeView('hello world', 0, 5)
+    autoSurroundSelection(view, '(')
+    expect(view.state.doc.toString()).toBe('(hello) world')
+    expect(view.state.selection.main.from).toBe(1)
+    expect(view.state.selection.main.to).toBe(6)
+    expect(
+      view.state.doc.sliceString(
+        view.state.selection.main.from,
+        view.state.selection.main.to,
+      ),
+    ).toBe('hello')
+
+    autoSurroundSelection(view, '`')
+    expect(view.state.doc.toString()).toBe('(`hello`) world')
   })
 
   it('does nothing for < and > (excluded from auto-surround)', () => {

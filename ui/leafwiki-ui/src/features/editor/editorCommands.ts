@@ -74,12 +74,17 @@ export const AUTO_SURROUND_PAIRS: Record<string, [string, string]> = {
   "'": ["'", "'"],
   '"': ['"', '"'],
   '`': ['`', '`'],
+  '~': ['~', '~'],
 }
 
 // If the view has a non-empty selection and `key` is one of the surround
 // trigger characters, wraps the selection in the matching pair and returns
 // true (caller should preventDefault). Otherwise returns false and leaves
 // the view untouched, so the caller falls through to normal typing.
+//
+// Keeps the original (inner) text selected afterwards, not the whole wrapped
+// block, so typing another surround character nests another pair around it
+// (e.g. selecting "text", typing "(" then "*" gives "(*text*)").
 export function autoSurroundSelection(view: EditorView, key: string) {
   const pair = AUTO_SURROUND_PAIRS[key]
   if (!pair) return false
@@ -87,7 +92,17 @@ export function autoSurroundSelection(view: EditorView, key: string) {
   const { from, to } = view.state.selection.main
   if (from === to) return false
 
-  insertWrappedText(view, pair[0], pair[1])
+  const [before, after] = pair
+  const selected = view.state.doc.sliceString(from, to)
+
+  view.dispatch({
+    changes: { from, to, insert: `${before}${selected}${after}` },
+    selection: {
+      anchor: from + before.length,
+      head: from + before.length + selected.length,
+    },
+  })
+  view.focus()
   return true
 }
 
