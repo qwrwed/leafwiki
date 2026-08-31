@@ -1822,6 +1822,39 @@
     @apply mt-10 mb-3;
   }
 
+  .page-viewer__content blockquote p:first-of-type:not(:first-child)::before,
+  .markdown-editor__preview blockquote p:first-of-type:not(:first-child)::before,
+  .page-history__preview-body blockquote p:first-of-type:not(:first-child)::before,
+  .page-viewer__content blockquote p:last-of-type:not(:last-child)::after,
+  .markdown-editor__preview blockquote p:last-of-type:not(:last-child)::after,
+  .page-history__preview-body blockquote p:last-of-type:not(:last-child)::after {
+    content: none;
+  }
+
+  .page-viewer__content blockquote > :first-child:not(ul):not(ol)::before,
+  .markdown-editor__preview blockquote > :first-child:not(ul):not(ol)::before,
+  .page-history__preview-body blockquote > :first-child:not(ul):not(ol)::before,
+  .page-viewer__content blockquote > :first-child:is(ul, ol) > li:first-child:not(:has(> ul:first-child, > ol:first-child))::before,
+  .markdown-editor__preview blockquote > :first-child:is(ul, ol) > li:first-child:not(:has(> ul:first-child, > ol:first-child))::before,
+  .page-history__preview-body blockquote > :first-child:is(ul, ol) > li:first-child:not(:has(> ul:first-child, > ol:first-child))::before,
+  .page-viewer__content blockquote > :first-child:is(ul, ol) > li:first-child > :first-child:is(ul, ol) > li:first-child::before,
+  .markdown-editor__preview blockquote > :first-child:is(ul, ol) > li:first-child > :first-child:is(ul, ol) > li:first-child::before,
+  .page-history__preview-body blockquote > :first-child:is(ul, ol) > li:first-child > :first-child:is(ul, ol) > li:first-child::before {
+    content: open-quote;
+  }
+
+  .page-viewer__content blockquote > :last-child:not(ul):not(ol)::after,
+  .markdown-editor__preview blockquote > :last-child:not(ul):not(ol)::after,
+  .page-history__preview-body blockquote > :last-child:not(ul):not(ol)::after,
+  .page-viewer__content blockquote > :last-child:is(ul, ol) > li:last-child:not(:has(> ul:last-child, > ol:last-child))::after,
+  .markdown-editor__preview blockquote > :last-child:is(ul, ol) > li:last-child:not(:has(> ul:last-child, > ol:last-child))::after,
+  .page-history__preview-body blockquote > :last-child:is(ul, ol) > li:last-child:not(:has(> ul:last-child, > ol:last-child))::after,
+  .page-viewer__content blockquote > :last-child:is(ul, ol) > li:last-child > :last-child:is(ul, ol) > li:last-child::after,
+  .markdown-editor__preview blockquote > :last-child:is(ul, ol) > li:last-child > :last-child:is(ul, ol) > li:last-child::after,
+  .page-history__preview-body blockquote > :last-child:is(ul, ol) > li:last-child > :last-child:is(ul, ol) > li:last-child::after {
+    content: close-quote;
+  }
+
   .page-viewer__content :where(h2),
   .markdown-editor__preview :where(h2),
   .page-history__preview-body :where(h2) {
