@@ -3538,7 +3538,7 @@ html.privacy-blur-active .page-viewer__content,
 html.privacy-blur-active .page-viewer__toc-panel-list,
 html.privacy-blur-active .search-result-card__title,
 html.privacy-blur-active .page-dialog__title-row .form-input {
-  filter: blur(0.3em);
+  filter: blur(0.55em);
   user-select: none;
 }
 
@@ -3555,13 +3555,13 @@ html.privacy-blur-active .page-dialog__title-row .form-input {
 html.privacy-blur-active .tree-node__title,
 html.privacy-blur-active .editor-title-bar__title,
 html.privacy-blur-active .editor-title-bar__slug {
-  padding-inline: 1em;
-  margin-inline: -1em;
+  padding-inline: 1.8em;
+  margin-inline: -1.8em;
 }
 
 html.privacy-blur-active .tree-node__tooltip-parent {
-  padding-inline: 1em;
-  margin-inline: -1em;
+  padding-inline: 1.8em;
+  margin-inline: -1.8em;
 }
 
 /* -------------------------------------------------------
