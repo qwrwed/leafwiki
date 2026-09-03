@@ -5,6 +5,7 @@ import {
 } from '@codemirror/autocomplete'
 import {
   defaultKeymap,
+  deleteLine,
   history,
   historyKeymap,
   indentWithTab,
@@ -162,6 +163,14 @@ export default function MarkdownCodeEditor({
           insertWrappedText(view, '`', '`')
           return true
         },
+        preventDefault: true,
+      },
+      {
+        // VS Code's Shift-Delete deletes the line but also copies it to the
+        // clipboard (it's really "cut line"). CodeMirror's deleteLine doesn't
+        // touch the clipboard, which is the behavior wanted here.
+        key: 'Shift-Delete',
+        run: deleteLine,
         preventDefault: true,
       },
       {

@@ -45,6 +45,7 @@ vi.mock('@codemirror/view', () => ({
 
 vi.mock('@codemirror/commands', () => ({
   defaultKeymap: [],
+  deleteLine: vi.fn(),
   history: () => ({}),
   historyKeymap: [],
   indentWithTab: {},
