@@ -3540,14 +3540,24 @@ html.privacy-blur-active .page-dialog__title-row .form-input {
   user-select: none;
 }
 
-/* These three truncate their text (overflow: hidden, for the ellipsis), which
+/* These truncate their text (overflow: hidden, for the ellipsis), which
    clips the blur filter hard at the box edge instead of letting it feather —
    the text sits flush against that edge with no room for the blur to fade
    into. Padding gives it that room; the matching negative margin cancels the
-   padding back out so nothing shifts when blur is off. */
+   padding back out so nothing shifts when blur is off.
+
+   .tree-node__title also sits inside .tree-node__tooltip-parent, itself
+   overflow: hidden with no padding of its own — the bleed from the title's
+   blur gets clipped a second time at that outer edge, so it needs the same
+   treatment. */
 html.privacy-blur-active .tree-node__title,
 html.privacy-blur-active .editor-title-bar__title,
 html.privacy-blur-active .editor-title-bar__slug {
+  padding-inline: 0.3em;
+  margin-inline: -0.3em;
+}
+
+html.privacy-blur-active .tree-node__tooltip-parent {
   padding-inline: 0.3em;
   margin-inline: -0.3em;
 }
