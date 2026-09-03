@@ -3553,13 +3553,13 @@ html.privacy-blur-active .page-dialog__title-row .form-input {
 html.privacy-blur-active .tree-node__title,
 html.privacy-blur-active .editor-title-bar__title,
 html.privacy-blur-active .editor-title-bar__slug {
-  padding-inline: 0.3em;
-  margin-inline: -0.3em;
+  padding-inline: 1em;
+  margin-inline: -1em;
 }
 
 html.privacy-blur-active .tree-node__tooltip-parent {
-  padding-inline: 0.3em;
-  margin-inline: -0.3em;
+  padding-inline: 1em;
+  margin-inline: -1em;
 }
 
 /* -------------------------------------------------------
