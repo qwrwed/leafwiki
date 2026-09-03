@@ -7,6 +7,7 @@ import { useFavoritesStore } from '@/stores/favorites'
 import { useSessionStore } from '@/stores/session'
 import { useUserSettingsStore } from '@/stores/userSettings'
 import useApplyDesignMode from '@/useApplyDesignMode'
+import useApplyPrivacyBlur from '@/useApplyPrivacyBlur'
 import { Loader2 } from 'lucide-react'
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { RouterProvider } from 'react-router/dom'
@@ -40,6 +41,7 @@ function App() {
   const clearUserSettings = useUserSettingsStore((s) => s.clearUserSettings)
 
   useApplyDesignMode()
+  useApplyPrivacyBlur()
   useEffect(() => {
     loadConfig()
   }, [loadConfig])

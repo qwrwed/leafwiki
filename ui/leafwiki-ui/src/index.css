@@ -3520,6 +3520,27 @@
 }
 
 /* -------------------------------------------------------
+   PRIVACY BLUR — blurs user-written page titles/content so
+   the screen isn't readable at a glance. Toggled by adding
+   .privacy-blur-active to <html> (see useApplyPrivacyBlur).
+   Field labels, dates, column headers and people's names are
+   left readable; only wiki-authored text is blurred.
+------------------------------------------------------- */
+html.privacy-blur-active .tree-node__title,
+html.privacy-blur-active .breadcrumbs-nav__current,
+html.privacy-blur-active .breadcrumbs-nav__link,
+html.privacy-blur-active .editor-title-bar__title,
+html.privacy-blur-active .editor-title-bar__slug,
+html.privacy-blur-active .markdown-code-editor,
+html.privacy-blur-active .page-viewer__content,
+html.privacy-blur-active .page-viewer__toc-panel-list,
+html.privacy-blur-active .search-result-card__title,
+html.privacy-blur-active .page-dialog__title-row .form-input {
+  filter: blur(0.3em);
+  user-select: none;
+}
+
+/* -------------------------------------------------------
    UTILITIES LAYER — Markdown, tables, custom scrollbars
 ------------------------------------------------------- */
 @layer utilities {

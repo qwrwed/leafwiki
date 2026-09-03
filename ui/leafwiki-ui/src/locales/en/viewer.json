@@ -135,6 +135,10 @@
     "switchToLight": "Switch to light mode",
     "switchToDark": "Switch to dark mode"
   },
+  "privacyBlurToggle": {
+    "hide": "Hide page titles and content",
+    "show": "Show page titles and content"
+  },
   "imagePreview": {
     "openInNewTab": "Open in new tab"
   },

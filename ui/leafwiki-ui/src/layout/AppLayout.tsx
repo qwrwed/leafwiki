@@ -7,6 +7,7 @@ import { BackupWarningIndicator } from '@/features/backup/BackupWarningIndicator
 import DesignToggle from '@/features/designtoggle/DesignToggle'
 import { EditorTitleBar } from '@/features/editor/EditorTitleBar'
 import { PageQuickSwitcherTrigger } from '@/features/page-switcher/PageQuickSwitcherTrigger'
+import PrivacyBlurToggle from '@/features/privacyblur/PrivacyBlurToggle'
 import Progressbar from '@/features/progressbar/Progressbar'
 import Sidebar from '@/features/sidebar/Sidebar'
 import SettingsNav from '@/features/settings/SettingsNav'
@@ -228,6 +229,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
           <div className="app-layout__editor-toolbar-container">
             <PageQuickSwitcherTrigger />
+            <PrivacyBlurToggle />
             <DesignToggle />
             <Toolbar />
             <BackupWarningIndicator />

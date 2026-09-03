@@ -135,6 +135,10 @@
     "switchToLight": "Zum hellen Modus wechseln",
     "switchToDark": "Zum dunklen Modus wechseln"
   },
+  "privacyBlurToggle": {
+    "hide": "Seitentitel und Inhalt ausblenden",
+    "show": "Seitentitel und Inhalt einblenden"
+  },
   "imagePreview": {
     "openInNewTab": "In neuem Tab öffnen"
   },
