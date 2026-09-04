@@ -5,7 +5,30 @@
     <link rel="icon" href="{{__FAVICON_HREF__}}" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="base-path" content="{{__BASE_PATH__}}" />
+    <meta name="color-scheme" content="light dark" />
     <title>{{__SITE_NAME__}}</title>
+    <script>
+      // Apply the design mode before first paint, otherwise the page paints
+      // white until React mounts and shows a white flash in dark mode.
+      // Mirrors useApplyDesignMode / the design-mode store; the two colours
+      // below are --background for :root and .dark in src/index.css.
+      (function () {
+        var mode = 'system'
+        try {
+          // Throws when storage is blocked (e.g. a sandboxed WebView); in that
+          // case keep 'system' rather than skipping the theme altogether.
+          mode = localStorage.getItem('design-mode') || 'system'
+        } catch (e) {}
+        var dark =
+          mode === 'system'
+            ? !window.matchMedia('(prefers-color-scheme: light)').matches
+            : mode === 'dark'
+        if (dark) document.documentElement.classList.add('dark')
+        document.documentElement.style.backgroundColor = dark
+          ? 'hsl(222 28% 8%)'
+          : 'hsl(0 0% 100%)'
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
