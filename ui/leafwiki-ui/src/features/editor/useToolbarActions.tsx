@@ -24,6 +24,7 @@ import { isDirtyState } from './pageEditorStore'
 export interface ToolbarActionsOptions {
   savePage: () => void
   closePage: () => void
+  saveAndClosePage: () => void
   formatBold: () => void
   formatItalic: () => void
   formatInlineCode: () => void
@@ -36,6 +37,7 @@ export interface ToolbarActionsOptions {
 export function useToolbarActions({
   savePage,
   closePage,
+  saveAndClosePage,
   formatBold,
   formatItalic,
   formatInlineCode,
@@ -162,6 +164,18 @@ export function useToolbarActions({
       { shouldHandle: editorCloseShouldHandle },
     )
 
+    const saveAndCloseHotkey: HotKeyDefinition = createHotkeyDefinition(
+      'editor.page.saveAndClose',
+      () => {
+        const view = getEditorView?.()
+        if (view && completionStatus(view.state) !== null) {
+          return
+        }
+
+        saveAndClosePage()
+      },
+    )
+
     const boldHotkey: HotKeyDefinition = createHotkeyDefinition(
       'editor.format.bold',
       formatBold,
@@ -204,6 +218,7 @@ export function useToolbarActions({
 
     registerHotkey(saveHotKey)
     registerHotkey(closeHotkey)
+    registerHotkey(saveAndCloseHotkey)
     registerHotkey(boldHotkey)
     registerHotkey(italicHotkey)
     registerHotkey(heading1Hotkey)
@@ -216,6 +231,7 @@ export function useToolbarActions({
     return () => {
       unregisterHotkey(saveHotKey.keyCombo)
       unregisterHotkey(closeHotkey.keyCombo)
+      unregisterHotkey(saveAndCloseHotkey.keyCombo)
       unregisterHotkey(boldHotkey.keyCombo)
       unregisterHotkey(italicHotkey.keyCombo)
       unregisterHotkey(heading1Hotkey.keyCombo)
@@ -231,6 +247,7 @@ export function useToolbarActions({
     setButtons,
     savePage,
     closePage,
+    saveAndClosePage,
     formatBold,
     formatItalic,
     formatInlineCode,

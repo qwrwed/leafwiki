@@ -18,6 +18,7 @@ export type ShortcutId =
   | 'viewer.toc.toggle'
   | 'editor.page.close'
   | 'editor.page.save'
+  | 'editor.page.saveAndClose'
   | 'editor.format.bold'
   | 'editor.format.italic'
   | 'editor.heading.one'
@@ -188,6 +189,16 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     keyCombo: 'Mod+KeyS',
     defaultDisplayLabel: 'Ctrl+S',
     macDisplayLabel: 'Cmd+S',
+    modes: ['edit'],
+    customizable: true,
+  },
+  {
+    id: 'editor.page.saveAndClose',
+    labelKey: 'shortcutsHelp.items.saveAndCloseEditor.action',
+    categoryKey: 'shortcutsHelp.categories.editing',
+    keyCombo: 'Mod+Enter',
+    defaultDisplayLabel: 'Ctrl+Enter',
+    macDisplayLabel: 'Cmd+Enter',
     modes: ['edit'],
     customizable: true,
   },

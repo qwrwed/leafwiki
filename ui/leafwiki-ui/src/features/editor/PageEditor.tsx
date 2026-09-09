@@ -163,6 +163,20 @@ export default function PageEditor() {
     }
   }, [navigate])
 
+  const handleSaveAndClose = useCallback(() => {
+    savePage()
+      .then((page) => {
+        if (page) {
+          toast.success(t('pageEditor.savedToast'))
+        }
+        handleClose()
+      })
+      .catch((err) => {
+        const mapped = mapApiError(err, t('pageEditor.saveErrorFallback'))
+        toast.error(mapped.message)
+      })
+  }, [savePage, t, handleClose])
+
   const openLinkDialog = useCallback(() => {
     const view = editorRef.current?.editorViewRef.current
     const selectedText = view
@@ -178,6 +192,7 @@ export default function PageEditor() {
   useToolbarActions({
     savePage: () => handleSave(),
     closePage: handleClose,
+    saveAndClosePage: () => handleSaveAndClose(),
     formatBold: () => editorRef.current?.insertWrappedText('**', '**'),
     formatItalic: () => editorRef.current?.insertWrappedText('_', '_'),
     formatInlineCode: () => editorRef.current?.insertWrappedText('`', '`'),

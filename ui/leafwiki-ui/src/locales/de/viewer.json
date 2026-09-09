@@ -216,6 +216,9 @@
       "closeEditor": {
         "action": "Editor schließen"
       },
+      "saveAndCloseEditor": {
+        "action": "Speichern und Editor schließen"
+      },
       "formatBold": {
         "action": "Fett formatieren"
       },

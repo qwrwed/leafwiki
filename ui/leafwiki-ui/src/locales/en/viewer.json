@@ -216,6 +216,9 @@
       "closeEditor": {
         "action": "Close editor"
       },
+      "saveAndCloseEditor": {
+        "action": "Save and close editor"
+      },
       "formatBold": {
         "action": "Format bold"
       },

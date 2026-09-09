@@ -47,6 +47,7 @@ describe('shortcutCatalog', () => {
       'editor.heading.three',
       'editor.heading.two',
       'editor.link.insert',
+      'editor.page.saveAndClose',
       'editor.page.save',
       'editor.lineWrap.toggle',
       'sidebar.explorer.open',
