@@ -261,6 +261,12 @@ export default function TreeNodeActionsMenu({
     ],
   )
 
+  const currentRoutePath = getCurrentRoutePath()
+  const currentRouterPath =
+    stripBasePath(currentRoutePath) ?? currentRoutePath
+  const isCurrentlyEditedNode =
+    currentRouterPath.startsWith('/e/') && currentEditorPageId === node.id
+
   return (
     <DropdownMenu
       open={open}
@@ -311,9 +317,19 @@ export default function TreeNodeActionsMenu({
               {t('treeActions.menuEdit', { item: itemLabelCapitalized })}
             </DropdownMenuItem>
             <DropdownMenuItem
-              className="cursor-pointer"
+              className={
+                isCurrentlyEditedNode
+                  ? 'cursor-not-allowed opacity-50'
+                  : 'cursor-pointer'
+              }
               data-testid="tree-view-action-button-rename"
+              title={
+                isCurrentlyEditedNode
+                  ? t('treeActions.renameEditingWarning', { item: itemLabel })
+                  : undefined
+              }
               onClick={() => {
+                if (isCurrentlyEditedNode) return
                 openDialog(DIALOG_EDIT_PAGE_METADATA, {
                   parentId: node.parentId ?? '',
                   currentId: node.id,
@@ -418,23 +434,19 @@ export default function TreeNodeActionsMenu({
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              className="text-error cursor-pointer"
+              className={
+                isCurrentlyEditedNode
+                  ? 'cursor-not-allowed opacity-50'
+                  : 'text-error cursor-pointer'
+              }
               data-testid="tree-view-action-button-delete"
+              title={
+                isCurrentlyEditedNode
+                  ? t('treeActions.deleteEditingWarning', { item: itemLabel })
+                  : undefined
+              }
               onClick={() => {
-                const currentRoutePath = getCurrentRoutePath()
-                const currentRouterPath =
-                  stripBasePath(currentRoutePath) ?? currentRoutePath
-                const isCurrentlyEditedNode =
-                  currentRouterPath.startsWith('/e/') &&
-                  currentEditorPageId === node.id
-
-                if (isCurrentlyEditedNode) {
-                  toast.warning(
-                    t('treeActions.deleteEditingWarning', { item: itemLabel }),
-                  )
-                  return
-                }
-
+                if (isCurrentlyEditedNode) return
                 openDialog(DIALOG_DELETE_PAGE_CONFIRMATION, {
                   pageId: node?.id,
                   redirectTo: getDeleteRedirectRoutePath(
