@@ -1,5 +1,5 @@
 import { TreeViewActionButton } from '@/features/tree/TreeViewActionButton'
-import { NODE_KIND_SECTION, PageNode } from '@/lib/api/pages'
+import { NODE_KIND_PAGE, NODE_KIND_SECTION, PageNode } from '@/lib/api/pages'
 import { DIALOG_ADD_PAGE } from '@/lib/registries'
 import { createNavigationVisitState } from '@/lib/navigationVisit'
 import { useIsMobile } from '@/lib/useIsMobile'
@@ -157,7 +157,31 @@ export const TreeNode = React.memo(function TreeNode({ node }: Props) {
                   }
                   tooltip={t('treeActions.createNewPageTooltip')}
                   onClick={() =>
-                    openDialog(DIALOG_ADD_PAGE, { parentId: node.id })
+                    openDialog(DIALOG_ADD_PAGE, {
+                      parentId: node.id,
+                      nodeKind: NODE_KIND_PAGE,
+                    })
+                  }
+                />
+              )}
+              {!readOnlyMode && (
+                <TreeViewActionButton
+                  actionName="add-section"
+                  icon={
+                    <FolderPlus
+                      size={18}
+                      className={clsx(
+                        'tree-node__action-icon',
+                        isMobile && 'text-brand/70!',
+                      )}
+                    />
+                  }
+                  tooltip={t('treeActions.createNewSectionTooltip')}
+                  onClick={() =>
+                    openDialog(DIALOG_ADD_PAGE, {
+                      parentId: node.id,
+                      nodeKind: NODE_KIND_SECTION,
+                    })
                   }
                 />
               )}
