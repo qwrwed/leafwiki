@@ -9,10 +9,10 @@ import { useSessionStore } from '@/stores/session'
 import { useTreeStore } from '@/stores/tree'
 import { useDraggable, useDroppable } from '@dnd-kit/core'
 import clsx from 'clsx'
-import { ChevronUp, FilePlus, FolderPlus } from 'lucide-react'
+import { ChevronUp, FilePlus, FolderPlus, Pencil } from 'lucide-react'
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { useTreeDndStore } from './treeDndStore'
 import { useTreeNodeActionsMenusStore } from './treeNodeActionsMenus'
 import TreeNodeActionsMenu from './TreeNodeActionsMenu'
@@ -23,6 +23,7 @@ type Props = {
 
 export const TreeNode = React.memo(function TreeNode({ node }: Props) {
   const { t } = useTranslation('viewer')
+  const navigate = useNavigate()
   const open = useTreeStore((s) => !!s.openNodeIdSet?.[node.id])
   const isStoreActive = useTreeStore((s) => s.activeNodeId === node.id)
   const toggleNode = useTreeStore((s) => s.toggleNode)
@@ -183,6 +184,22 @@ export const TreeNode = React.memo(function TreeNode({ node }: Props) {
                       nodeKind: NODE_KIND_SECTION,
                     })
                   }
+                />
+              )}
+              {!readOnlyMode && (
+                <TreeViewActionButton
+                  actionName="edit"
+                  icon={
+                    <Pencil
+                      size={18}
+                      className={clsx(
+                        'tree-node__action-icon',
+                        isMobile && 'text-brand/70!',
+                      )}
+                    />
+                  }
+                  tooltip={t('treeActions.editTooltip')}
+                  onClick={() => navigate(`/e/${node.path}`)}
                 />
               )}
               {(!readOnlyMode || isLoggedIn) && (
