@@ -75,7 +75,7 @@ export function useToolbarActions({
         hotkey: getShortcutDisplayLabel('editor.page.close', isMacOS),
         icon: <X size={18} />,
         action: closePage,
-        variant: 'destructive',
+        variant: dirty ? 'destructive' : 'outline',
         className: 'toolbar-button__close-editor',
       },
       {
