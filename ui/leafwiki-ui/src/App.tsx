@@ -1,4 +1,5 @@
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { useDesignModeStore } from '@/features/designtoggle/designmode'
 import { createLeafWikiRouter } from '@/features/router/router'
 import { useBootstrapAuth } from '@/lib/bootstrapAuth'
 import { BASE_PATH } from '@/lib/config'
@@ -39,6 +40,7 @@ function App() {
   const clearFavorites = useFavoritesStore((s) => s.clearFavorites)
   const loadUserSettings = useUserSettingsStore((s) => s.loadUserSettings)
   const clearUserSettings = useUserSettingsStore((s) => s.clearUserSettings)
+  const designMode = useDesignModeStore((s) => s.mode)
 
   useApplyDesignMode()
   useApplyPrivacyBlur()
@@ -99,7 +101,7 @@ function App() {
 
   return (
     <>
-      <Toaster richColors position="bottom-right" />
+      <Toaster richColors position="bottom-right" theme={designMode} />
       {configHasLoaded && !(isRefreshing && !authDisabled) ? (
         <ErrorBoundary>
           <Suspense
