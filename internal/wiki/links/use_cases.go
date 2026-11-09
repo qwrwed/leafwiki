@@ -58,77 +58,39 @@ func (uc *GetLinkStatusUseCase) Execute(_ context.Context, in GetLinkStatusInput
 	return &GetLinkStatusOutput{Status: status}, nil
 }
 
-// ─── GetBacklinksUseCase ─────────────────────────────────────────────────────
-
-type GetBacklinksInput struct {
-	PageID string
+type GetBrokenLinksOutput struct {
+	Links []corelinks.BrokenLink
 }
 
-type GetBacklinksOutput struct {
-	Result *corelinks.BacklinkResult
-}
-
-type GetBacklinksUseCase struct {
+type GetBrokenLinksUseCase struct {
 	links *corelinks.LinkService
 }
 
-func NewGetBacklinksUseCase(l *corelinks.LinkService) *GetBacklinksUseCase {
-	return &GetBacklinksUseCase{links: l}
+func NewGetBrokenLinksUseCase(
+	l *corelinks.LinkService,
+) *GetBrokenLinksUseCase {
+	return &GetBrokenLinksUseCase{
+		links: l,
+	}
 }
 
-func (uc *GetBacklinksUseCase) Execute(_ context.Context, in GetBacklinksInput) (*GetBacklinksOutput, error) {
+func (uc *GetBrokenLinksUseCase) Execute(
+	_ context.Context,
+) (*GetBrokenLinksOutput, error) {
 	if uc.links == nil {
 		return nil, ErrLinkServiceUnavailable
 	}
-	result, err := uc.links.GetBacklinksForPage(in.PageID)
+
+	links, err := uc.links.GetBrokenLinks()
 	if err != nil {
 		return nil, err
 	}
-	return &GetBacklinksOutput{Result: result}, nil
-}
 
-// ─── GetOutgoingLinksUseCase ─────────────────────────────────────────────────
-
-type GetOutgoingLinksInput struct {
-	PageID string
-}
-
-type GetOutgoingLinksOutput struct {
-	Result *corelinks.OutgoingResult
-}
-
-type GetOutgoingLinksUseCase struct {
-	links *corelinks.LinkService
-}
-
-func NewGetOutgoingLinksUseCase(l *corelinks.LinkService) *GetOutgoingLinksUseCase {
-	return &GetOutgoingLinksUseCase{links: l}
-}
-
-func (uc *GetOutgoingLinksUseCase) Execute(_ context.Context, in GetOutgoingLinksInput) (*GetOutgoingLinksOutput, error) {
-	if uc.links == nil {
-		return nil, ErrLinkServiceUnavailable
+	if links == nil {
+		links = []corelinks.BrokenLink{}
 	}
-	result, err := uc.links.GetOutgoingLinksForPage(in.PageID)
-	if err != nil {
-		return nil, err
-	}
-	return &GetOutgoingLinksOutput{Result: result}, nil
-}
 
-// ─── ReindexLinksUseCase ─────────────────────────────────────────────────────
-
-type ReindexLinksUseCase struct {
-	links *corelinks.LinkService
-}
-
-func NewReindexLinksUseCase(l *corelinks.LinkService) *ReindexLinksUseCase {
-	return &ReindexLinksUseCase{links: l}
-}
-
-func (uc *ReindexLinksUseCase) Execute(_ context.Context) error {
-	if uc.links == nil {
-		return nil
-	}
-	return uc.links.IndexAllPages()
+	return &GetBrokenLinksOutput{
+		Links: links,
+	}, nil
 }

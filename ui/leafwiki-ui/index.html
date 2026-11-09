@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="base-path" content="{{__BASE_PATH__}}" />
     <meta name="color-scheme" content="light dark" />
-    <title>{{__SITE_NAME__}}</title>
+    <title>{{__PAGE_TITLE__}}</title>
     <script>
       // Apply the design mode before first paint, otherwise the page paints
       // white until React mounts and shows a white flash in dark mode.
@@ -31,7 +31,7 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">{{__BODY__}}</div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

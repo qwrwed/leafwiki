@@ -5,6 +5,7 @@ import (
 
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/perber/wiki/internal/links"
+	"github.com/perber/wiki/internal/test_utils"
 )
 
 func pageKindPtr() *tree.NodeKind {
@@ -23,6 +24,7 @@ func setupLinkEffect(t *testing.T) (*LinkIndexSideEffect, *links.LinkService, *t
 	if err != nil {
 		t.Fatalf("NewLinksStore: %v", err)
 	}
+	t.Cleanup(func() { test_utils.WrapCloseWithErrorCheck(store.Close, t) })
 	svc := links.NewLinkService(dataDir, ts, store)
 	return NewLinkIndexSideEffect(svc, nil, nil), svc, ts
 }
@@ -60,7 +62,7 @@ func TestLinkIndexSideEffect_Rename_HealsPreexistingBrokenWikilinks(t *testing.T
 		t.Fatalf("GetPage linker: %v", err)
 	}
 	content := "See [[Alpha]] for details."
-	if err := ts.UpdateNode("system", linkerPage.ID, linkerPage.Title, linkerPage.Slug, &content, tree.VersionUnchecked, nil, nil, false); err != nil {
+	if err := ts.UpdateNode(tree.UpdateNodeInput{UserID: "system", ID: linkerPage.ID, Title: linkerPage.Title, Slug: linkerPage.Slug, Content: &content, ExpectedVersion: tree.VersionUnchecked}); err != nil {
 		t.Fatalf("UpdateNode linker: %v", err)
 	}
 	linkerPage, err = ts.GetPage(linkerID)
@@ -71,17 +73,17 @@ func TestLinkIndexSideEffect_Rename_HealsPreexistingBrokenWikilinks(t *testing.T
 		t.Fatalf("UpdateLinksForPage: %v", err)
 	}
 
-	// Precondition: sentinel must be broken (ambiguous).
+	// Precondition: sentinel is ambiguous (unresolved, but not broken).
 	out, err := svc.GetOutgoingLinksForPage(linkerID)
 	if err != nil {
 		t.Fatalf("GetOutgoingLinksForPage: %v", err)
 	}
-	if out.Count != 1 || !out.Outgoings[0].Broken {
-		t.Fatalf("precondition failed: expected 1 broken [[Alpha]] sentinel, got %+v", out.Outgoings)
+	if out.Count != 1 || out.Outgoings[0].Broken || out.Outgoings[0].ToPageID != "" {
+		t.Fatalf("precondition failed: expected 1 ambiguous [[Alpha]] sentinel, got %+v", out.Outgoings)
 	}
 
 	// Rename "Alpha" → "Beta" in the tree (UpdateNode mutates the live node).
-	if err := ts.UpdateNode("system", alphaID, "Beta", "beta", nil, tree.VersionUnchecked, nil, nil, false); err != nil {
+	if err := ts.UpdateNode(tree.UpdateNodeInput{UserID: "system", ID: alphaID, Title: "Beta", Slug: "beta", Content: nil, ExpectedVersion: tree.VersionUnchecked}); err != nil {
 		t.Fatalf("UpdateNode rename alpha→beta: %v", err)
 	}
 	afterPage, err := ts.GetPage(alphaID)

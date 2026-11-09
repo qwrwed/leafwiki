@@ -12,7 +12,7 @@ export default class EditPage {
   async openReplacePanel() {
     const editor = this.page.locator('.cm-editor');
     await editor.click();
-    await this.page.keyboard.press('Control+h');
+    await this.page.keyboard.press('ControlOrMeta+h');
     await this.page.locator('.cm-search input[main-field="true"]').waitFor({ state: 'visible' });
   }
 
@@ -111,6 +111,19 @@ export default class EditPage {
 
     await fileChooser.setFiles(filePath);
     await expect(assets).toHaveCount(existingCount + 1);
+  }
+
+  // Drops an in-memory file onto the editor text the way a desktop file
+  // manager does: a native drop event whose DataTransfer carries the file.
+  async dropFileOnEditor(file: { name: string; content: string; type: string }) {
+    const content = this.page.locator('.cm-content');
+    await content.waitFor({ state: 'visible' });
+    const dataTransfer = await this.page.evaluateHandle(({ name, content, type }) => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([content], name, { type }));
+      return dt;
+    }, file);
+    await content.dispatchEvent('drop', { dataTransfer });
   }
 
   async listAmountOfAssets(): Promise<number> {

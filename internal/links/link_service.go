@@ -2,7 +2,9 @@ package links
 
 import (
 	"context"
+	"strings"
 
+	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/tree"
 )
 
@@ -114,7 +116,7 @@ func (b *LinkService) UpdateRewrittenLinksAndHealForPages(pages []*tree.Page, ru
 		if page == nil {
 			continue
 		}
-		pagePath := normalizeWikiPath(page.CalculatePath())
+		pagePath := markdown.NormalizeRoutePath(page.CalculatePath())
 		targets := rewriteResolvedTargets(pagePath, outgoingByPageID[page.ID], rules, b.treeService)
 		updates = append(updates, PageLinkUpdate{
 			FromPageID: page.ID,
@@ -132,7 +134,7 @@ func (b *LinkService) UpdateRewrittenLinksAndHealForPages(pages []*tree.Page, ru
 }
 
 func (b *LinkService) GetLinkStatusForPage(pageID string, pagePath string) (*LinkStatusResult, error) {
-	pagePath = normalizeWikiPath(pagePath)
+	pagePath = markdown.NormalizeRoutePath(pagePath)
 	page, err := b.treeService.GetPage(pageID)
 	if err != nil {
 		return nil, err
@@ -166,12 +168,9 @@ func (b *LinkService) GetLinkStatusForPage(pageID string, pagePath string) (*Lin
 	brokenOut := make([]OutgoingResultItem, 0)
 	for _, outgoing := range outgoings {
 		item := toOutgoingResultItem(b.treeService, outgoing)
-		if outgoing.Broken && b.isAmbiguousWikilinkOutgoing(outgoing) {
-			item.Broken = false
-			okOut = append(okOut, item)
-			continue
-		}
-		if item.Broken {
+		// Ambiguous links are not broken: they resolve to every matching page
+		// and are listed as backlinks there.
+		if outgoing.State == LinkBroken {
 			brokenOut = append(brokenOut, item)
 		} else {
 			okOut = append(okOut, item)
@@ -213,7 +212,7 @@ func (b *LinkService) mergeAmbiguousWikiLinksIntoBacklinks(pageID string, pageTi
 		return backlinks, nil
 	}
 
-	ambiguousRefs, err := b.store.GetBrokenIncomingForPath(wikilinkSentinel(pageTitle))
+	ambiguousRefs, err := b.store.GetAmbiguousIncomingForTitle(pageTitle)
 	if err != nil {
 		return nil, err
 	}
@@ -243,14 +242,6 @@ func (b *LinkService) mergeAmbiguousWikiLinksIntoBacklinks(pageID string, pageTi
 	return merged, nil
 }
 
-func (b *LinkService) isAmbiguousWikilinkOutgoing(outgoing Outgoing) bool {
-	if !outgoing.Broken || !IsWikilinkSentinel(outgoing.ToPath) {
-		return false
-	}
-
-	return len(b.treeService.FindPagesByTitle(WikilinkTitleFromSentinel(outgoing.ToPath))) > 1
-}
-
 func (b *LinkService) UpdateLinksForPage(page *tree.Page, content string) error {
 	targets := collectTargetsFromContent(b.treeService, page.CalculatePath(), content)
 	return b.store.AddLinks(page.ID, page.Title, targets)
@@ -262,7 +253,7 @@ func (b *LinkService) UpdateLinksAndHealForPages(pages []*tree.Page) error {
 		if page == nil {
 			continue
 		}
-		pagePath := normalizeWikiPath(page.CalculatePath())
+		pagePath := markdown.NormalizeRoutePath(page.CalculatePath())
 		targets := collectTargetsFromContent(b.treeService, pagePath, page.Content)
 		updates = append(updates, PageLinkUpdate{
 			FromPageID: page.ID,
@@ -291,45 +282,38 @@ func (b *LinkService) MarkIncomingLinksBrokenForPage(pageID string) error {
 
 // MarkLinksBrokenForPath marks links pointing to an exact path as broken.
 func (b *LinkService) MarkLinksBrokenForPath(toPath string) error {
-	toPath = normalizeWikiPath(toPath)
+	toPath = markdown.NormalizeRoutePath(toPath)
 	return b.store.MarkLinksBrokenForPath(toPath)
 }
 
 // MarkLinksBrokenForPrefix marks all links under a prefix as broken (subtree move/delete).
 func (b *LinkService) MarkLinksBrokenForPrefix(prefix string) error {
-	prefix = normalizeWikiPath(prefix)
+	prefix = markdown.NormalizeRoutePath(prefix)
 	return b.store.MarkLinksBrokenForPrefix(prefix)
 }
 
 func (b *LinkService) HealLinksForExactPath(page *tree.Page) error {
-	toPath := normalizeWikiPath(page.CalculatePath())
+	toPath := markdown.NormalizeRoutePath(page.CalculatePath())
 	return b.store.HealLinksForPath(toPath, page.ID)
 }
 
-// HealWikiLinksForPage heals broken [[Title]] sentinel records that target
-// this page's title, but only when exactly one page with that title exists.
-// If the title is shared by multiple pages the link is ambiguous and must
-// remain as a broken sentinel.
-func (b *LinkService) HealWikiLinksForPage(page *tree.Page) error {
-	if len(b.treeService.FindPagesByTitle(page.Title)) != 1 {
-		return nil
-	}
-	return b.store.HealWikiLinksForTitle(page.Title, page.ID)
-}
-
-// HealWikiLinksForTitleIfUnambiguous heals broken [[Title]] sentinels when
-// exactly one page with that title now exists. Called after a page is deleted
-// so that formerly ambiguous wikilinks become resolved if only one candidate
-// remains.
-func (b *LinkService) HealWikiLinksForTitleIfUnambiguous(title string) error {
+// ReconcileTitle recomputes the state of every [[title]] wiki-link record
+// against the current tree (see classifyTitleMatches). Call it whenever the
+// set of pages carrying this title changed: page created, restored, renamed
+// (old and new title) or deleted. Every wiki-link to a title shares one
+// "wikilink:<title>" key, so this is a single UPDATE and never needs the
+// source pages.
+func (b *LinkService) ReconcileTitle(title string) error {
+	title = strings.TrimSpace(title)
 	if title == "" {
 		return nil
 	}
 	matches := b.treeService.FindPagesByTitle(title)
-	if len(matches) != 1 {
-		return nil
+	pageID := ""
+	if len(matches) == 1 {
+		pageID = matches[0].ID
 	}
-	return b.store.HealWikiLinksForTitle(title, matches[0].ID)
+	return b.store.ReconcileWikiLinksForTitle(title, classifyTitleMatches(len(matches)), pageID)
 }
 
 func (b *LinkService) Close() error {
@@ -350,24 +334,63 @@ func pageIDsForPages(pages []*tree.Page) []string {
 	return ids
 }
 
+// rewriteResolvedTargets rebuilds a page's link rows after a path/title
+// rewrite. ReplaceLinksAndHeal replaces ALL rows of the page, so every stored
+// outgoing link must come back out of here or its row is lost.
+//
+//   - Path links are rewritten by the path rules and re-resolved.
+//   - Wiki-link sentinels are title-based, never path-rewritten (that would
+//     mangle them into "/wikilink:..."). A rename rule (OldTitle → NewTitle)
+//     already rewrote [[OldTitle]] in the content, so the row follows it. The
+//     title is then re-resolved against the current tree.
 func rewriteResolvedTargets(currentPath string, outgoings []Outgoing, rules []RewriteRule, treeService *tree.TreeService) []TargetLink {
 	if len(outgoings) == 0 {
 		return nil
 	}
 
 	paths := make([]string, 0, len(outgoings))
+	var wikiTitles []string
 	for _, outgoing := range outgoings {
 		if IsWikilinkSentinel(outgoing.ToPath) {
-			// Title-based wiki-link sentinels are resolved by title, not path.
-			// Skip path rewriting — they are healed separately by HealWikiLinksForPage.
+			wikiTitles = append(wikiTitles, rewriteWikiTitle(WikilinkTitleFromSentinel(outgoing.ToPath), rules))
 			continue
 		}
-		targetPath := normalizeWikiPath(outgoing.ToPath)
+		targetPath := markdown.NormalizeRoutePath(outgoing.ToPath)
 		if rewritten, ok := applyRewriteRules(targetPath, rules); ok {
 			targetPath = rewritten
 		}
 		paths = append(paths, targetPath)
 	}
 
-	return resolveTargetLinks(treeService, currentPath, paths)
+	result := resolveTargetLinks(treeService, currentPath, paths)
+	return append(result, resolveWikiLinkTargets(treeService, wikiTitles)...)
+}
+
+// rewriteWikiTitle applies a rename rule's OldTitle → NewTitle to a wiki-link
+// title, matching case-insensitively like the content rewrite does.
+func rewriteWikiTitle(title string, rules []RewriteRule) string {
+	for _, rule := range rules {
+		if rule.OldTitle != "" && rule.OldTitle != rule.NewTitle && strings.EqualFold(rule.OldTitle, title) {
+			return rule.NewTitle
+		}
+	}
+	return title
+}
+
+func (b *LinkService) GetBrokenLinks() ([]BrokenLink, error) {
+	links, err := b.store.GetBrokenLinks()
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range links {
+		page, err := b.treeService.GetPage(links[i].FromPageID)
+		if err != nil {
+			return nil, err
+		}
+
+		links[i].FromPath = page.CalculatePath()
+	}
+
+	return links, nil
 }

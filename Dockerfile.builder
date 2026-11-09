@@ -1,5 +1,5 @@
 # Stage 1: Frontend build
-FROM node:26-alpine@sha256:725aeba2364a9b16beae49e180d83bd597dbd0b15c47f1f28875c290bfd255b9 AS frontend
+FROM node:26-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS frontend
 
 WORKDIR /ui
 ARG APP_VERSION
@@ -12,7 +12,7 @@ COPY ./ui/leafwiki-ui/ ./
 RUN VITE_API_URL=/ APP_VERSION=${APP_VERSION} npm run build
 
 # Stage 2: Go backend build
-FROM golang:1.26-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS builder
+FROM golang:1.27.3-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS builder
 
 ARG APP_VERSION
 ARG GOOS
@@ -34,6 +34,7 @@ COPY . .
 # Copy built frontend
 COPY --from=frontend /ui/dist ./internal/http/dist
 
-RUN go build \
+# -tags nomsgpack drops gin's unused MessagePack codec (~5MB with -trimpath).
+RUN go build -trimpath -tags nomsgpack \
   -ldflags="-s -w -X github.com/perber/wiki/internal/http.EmbedFrontend=true -X github.com/perber/wiki/internal/http.Environment=production -X main.Version=${APP_VERSION}" \
   -o /out/${OUTPUT} ./cmd/leafwiki

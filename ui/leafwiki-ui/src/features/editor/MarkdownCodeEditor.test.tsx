@@ -48,7 +48,12 @@ vi.mock('@codemirror/commands', () => ({
   deleteLine: vi.fn(),
   history: () => ({}),
   historyKeymap: [],
-  indentWithTab: {},
+  indentLess: () => true,
+  insertTab: () => true,
+}))
+
+vi.mock('@codemirror/language', () => ({
+  indentUnit: { of: () => ({}) },
 }))
 
 vi.mock('@codemirror/lang-markdown', () => ({ markdown: () => ({}) }))
@@ -73,6 +78,8 @@ vi.mock('./internalLinkCompletion', () => ({
   internalLinkCompletionSource: {},
   wikiLinkCompletionSource: {},
 }))
+
+vi.mock('./spellcheck', () => ({ spellcheck: [] }))
 
 import MarkdownCodeEditor from './MarkdownCodeEditor'
 

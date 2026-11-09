@@ -8,7 +8,6 @@ import {
   deleteLine,
   history,
   historyKeymap,
-  indentWithTab,
 } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { openSearchPanel, search, searchKeymap } from '@codemirror/search'
@@ -24,12 +23,15 @@ import {
   autoSurroundSelection,
   insertHeadingAtStart,
   insertWrappedText,
+  tabIndentKeyBinding,
+  tabIndentUnit,
 } from './editorCommands'
 import type { InternalLinkCompletion } from './internalLinkCompletion'
 import {
   internalLinkCompletionSource,
   wikiLinkCompletionSource,
 } from './internalLinkCompletion'
+import { spellcheck } from './spellcheck'
 
 // Extensions toggled via lineWrapCompartment
 const noWrapExtensions = EditorView.theme({
@@ -226,6 +228,8 @@ export default function MarkdownCodeEditor({
         themeCompartment.of(designMode === 'light' ? githubLight : oneDark),
         lineWrapCompartment.of(lineWrap ? wrapExtensions : noWrapExtensions),
         markdown({ extensions: [Strikethrough] }),
+        spellcheck,
+        tabIndentUnit,
         search({
           top: true,
         }),
@@ -250,7 +254,7 @@ export default function MarkdownCodeEditor({
         keymap.of([
           ...customShortcuts,
           ...searchKeymap,
-          indentWithTab,
+          tabIndentKeyBinding,
           ...historyKeymap,
           ...defaultKeymap,
         ]),
@@ -265,6 +269,14 @@ export default function MarkdownCodeEditor({
             ) {
               event.preventDefault()
             }
+          },
+          // CodeMirror's built-in drop handler reads every dropped file as
+          // text and inlines whatever doesn't look binary (.txt, .md, .csv…).
+          // File drops are uploads, handled by the outer React onDrop
+          // (useEditorFileUpload); returning true skips CodeMirror's handler
+          // while the event still bubbles there.
+          drop(event) {
+            return (event.dataTransfer?.files.length ?? 0) > 0
           },
           // Rich paste (HTML → Markdown) is not wired to the plain paste event
           // here — it's only reachable via the Shift-Mod-v keymap above and the

@@ -11,6 +11,7 @@ import {
 } from '@/lib/registries'
 import { buildHistoryUrl } from '@/lib/routePath'
 import { FavoriteToggleButton } from '@/features/favorites/FavoriteToggleButton'
+import { getPageAttachments, type PageAttachment } from '@/lib/api/assets'
 import { pinPage } from '@/lib/api/pages'
 import { createHotkeyDefinition } from '@/lib/shortcuts/shortcutCatalog'
 import { useScrollRestoration } from '@/lib/useScrollRestoration'
@@ -20,12 +21,13 @@ import {
   getWikiTargetRoutePath,
   toWikiLookupPath,
 } from '@/lib/wikiPath'
+import { useConfigStore } from '@/stores/config'
 import { useDialogsStore } from '@/stores/dialogs'
 import { useHotKeysStore } from '@/stores/hotkeys'
 import { useSessionStore } from '@/stores/session'
 import { useTocPanelStore } from '@/stores/tocPanel'
 import { useTreeStore } from '@/stores/tree'
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { createPortal } from 'react-dom'
@@ -35,11 +37,13 @@ import { extractTocEntries } from '../preview/extractTocEntries'
 import MarkdownPreview from '../preview/MarkdownPreview'
 import { TocDropdownButton } from '../preview/TocDropdownButton'
 import { TocSidePanel } from '../preview/TocSidePanel'
+import { shouldShowToc } from '../preview/tocVisibility'
 import { useTocScrollSpy } from '../preview/useTocScrollSpy'
 import Breadcrumbs from './Breadcrumbs'
 import EmptySectionChildrenList from './EmptySectionChildrenList'
 import { PageMetadata } from './PageMetadata'
 import { useScrollToHeadline } from './useScrollToHeadline'
+import { useScrollToSearchQuery } from './useScrollToSearchQuery'
 import { useSetPageTitle } from './useSetPageTitle'
 import { useToolbarActions } from './useToolbarActions'
 import { useViewerStore } from './viewer'
@@ -114,8 +118,9 @@ export default function PageViewer() {
 
   useScrollRestoration(getNavigationVisitKey(location), loading)
   useScrollToHeadline({ content: page?.content || '', isLoading: loading })
+  useScrollToSearchQuery({ content: page?.content || '', isLoading: loading })
   useToolbarActions(actions)
-  useSetPageTitle({ page })
+  useSetPageTitle({ page, settled: notFound || !!error })
 
   useEffect(() => {
     const path = toWikiLookupPath(pathname)
@@ -143,16 +148,39 @@ export default function PageViewer() {
     () => (page ? extractTocEntries(page.content) : []),
     [page],
   )
+  const [attachments, setAttachments] = useState<PageAttachment[]>([])
 
-  const showTocButton = tocEntries.length > 3
+  useEffect(() => {
+    if (!page?.id) {
+      setAttachments([])
+      return
+    }
+
+    let cancelled = false
+    getPageAttachments(page.id)
+      .then((files) => {
+        if (!cancelled) setAttachments(files)
+      })
+      .catch(() => {
+        if (!cancelled) setAttachments([])
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [page?.id])
+
+  const alwaysShowToc = useConfigStore((s) => s.alwaysShowToc)
+  const showToc = shouldShowToc(tocEntries.length, alwaysShowToc)
+  const showRightPane = showToc || attachments.length > 0
   // Single scroll spy for both the dropdown and the side panel.
-  const tocActiveId = useTocScrollSpy(showTocButton ? tocEntries : [])
+  const tocActiveId = useTocScrollSpy(showToc ? tocEntries : [])
 
   const toggleTocCollapsed = useTocPanelStore((state) => state.toggleCollapsed)
   const tocCollapsed = useTocPanelStore((state) => state.collapsed)
 
   useEffect(() => {
-    if (!showTocButton) return
+    if (!showRightPane) return
 
     const tocToggleHotkey = createHotkeyDefinition(
       'viewer.toc.toggle',
@@ -161,7 +189,7 @@ export default function PageViewer() {
     registerHotkey(tocToggleHotkey)
 
     return () => unregisterHotkey(tocToggleHotkey.keyCombo)
-  }, [showTocButton, toggleTocCollapsed, registerHotkey, unregisterHotkey])
+  }, [showRightPane, toggleTocCollapsed, registerHotkey, unregisterHotkey])
 
   const editorName = displayUser(page?.metadata?.lastAuthor)
   const updatedRelative = formatRelativeTime(page?.metadata?.updatedAt)
@@ -175,7 +203,7 @@ export default function PageViewer() {
           <div
             className={cn(
               'page-viewer__subheader print:hidden',
-              showTocButton &&
+              showRightPane &&
                 (tocCollapsed
                   ? 'page-viewer__subheader--toc-reserved-collapsed'
                   : 'page-viewer__subheader--toc-reserved'),
@@ -208,12 +236,13 @@ export default function PageViewer() {
                   />
                 )}
               </div>
-              {showTocButton && (
+              {showRightPane && (
                 <div className="page-viewer__toc-button">
                   <TocDropdownButton
-                    entries={tocEntries}
+                    entries={showToc ? tocEntries : []}
                     clickable
                     activeId={tocActiveId}
+                    downloads={attachments}
                   />
                 </div>
               )}
@@ -224,9 +253,13 @@ export default function PageViewer() {
       : null
 
   const tocPane =
-    showTocButton && page && !error && tocPaneRoot
+    showRightPane && page && !error && tocPaneRoot
       ? createPortal(
-          <TocSidePanel entries={tocEntries} activeId={tocActiveId} />,
+          <TocSidePanel
+            entries={showToc ? tocEntries : []}
+            activeId={tocActiveId}
+            downloads={attachments}
+          />,
           tocPaneRoot,
         )
       : null

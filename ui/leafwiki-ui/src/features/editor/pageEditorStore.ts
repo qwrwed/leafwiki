@@ -13,7 +13,7 @@ import i18next from '@/lib/i18n'
 import { useConfigStore } from '@/stores/config'
 import { useTreeStore } from '@/stores/tree'
 import { create } from 'zustand'
-import { useLinkStatusStore } from '../links/linkstatus_store'
+import { useLinkStatusStore } from '../links/linkStatusStore'
 import { confirmPageRefactor } from '../page/pageRefactorDialogState'
 import { useProgressbarStore } from '../progressbar/progressbarStore'
 import { useViewerStore } from '../viewer/viewer'
@@ -98,6 +98,10 @@ let isSavingMutex = false
 
 let loadController: AbortController | null = null
 
+// Bumped whenever the editor switches to another page load (or closes), so a
+// save response that arrives later is not applied to the page opened since.
+let editorSession = 0
+
 export const usePageEditorStore = create<PageEditorState>((set, get) => ({
   error: null,
   isLoading: false,
@@ -142,6 +146,7 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
   savePage: async (options?: { silent?: boolean }) => {
     const { page, title, slug, content, tags, frontmatterFields } = get()
     if (!page || !isDirtyState(get())) return
+    const session = editorSession
 
     const frontmatterErrors = validateEditorFrontmatterMetadata(
       tags,
@@ -226,7 +231,7 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
       // Keep the local page snapshot canonical after save so metadata-only
       // updates do not remain dirty when the API omits empty collections.
       set((state) => {
-        if (!state.page) return {}
+        if (!state.page || session !== editorSession) return {}
 
         if (
           updatedPage?.content === null ||
@@ -236,16 +241,17 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
             i18next.t('pageEditor.contentNullFallback', { ns: 'editor' }),
           )
         }
-        state.page.title = updatedPage.title
-        state.page.slug = updatedPage.slug
-        state.page.content = updatedPage.content
-        state.page.path = updatedPage.path
-        state.page.version = updatedPage.version
-        state.page.tags = nextTags
-        state.page.properties = nextProperties
-
         return {
-          page: state.page,
+          page: {
+            ...state.page,
+            title: updatedPage.title,
+            slug: updatedPage.slug,
+            content: updatedPage.content,
+            path: updatedPage.path,
+            version: updatedPage.version,
+            tags: nextTags,
+            properties: nextProperties,
+          },
           tags: nextTags,
           frontmatterFields: state.frontmatterFields.map((field) => {
             if (field.internal || field.type !== 'text') {
@@ -307,6 +313,7 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
   loadPageData: async (path: string) => {
     loadController?.abort()
     loadController = new AbortController()
+    editorSession++
     const { signal } = loadController
 
     useProgressbarStore.getState().setLoading(true)
@@ -369,6 +376,7 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
   // keep pointing at the last-edited page indefinitely after the editor closes.
   resetEditorState: () => {
     loadController?.abort()
+    editorSession++
     set({
       error: null,
       isLoading: false,

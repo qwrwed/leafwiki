@@ -2,7 +2,6 @@ package http
 
 import (
 	"embed"
-	"html"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -18,7 +17,9 @@ import (
 	auth_middleware "github.com/perber/wiki/internal/http/middleware/auth"
 	"github.com/perber/wiki/internal/http/middleware/maintenance"
 	"github.com/perber/wiki/internal/http/middleware/security"
+	"github.com/perber/wiki/internal/publicaccess"
 	"github.com/perber/wiki/internal/restore"
+	"github.com/perber/wiki/internal/tocdisplay"
 )
 
 //go:embed dist/**
@@ -49,24 +50,36 @@ func (sew *slogErrorWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-func slogRequestLogger() gin.HandlerFunc {
+func slogRequestLogger(capabilities *capabilityPrefixes) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
-		path := c.Request.URL.Path
-		if raw := c.Request.URL.RawQuery; raw != "" {
-			path += "?" + raw
-		}
-
 		c.Next()
 
 		slog.Default().Info("http request",
 			"method", c.Request.Method,
-			"path", path,
+			"path", loggedPath(c, capabilities),
 			"status", c.Writer.Status(),
 			"latency", time.Since(start),
 			"ip", c.ClientIP(),
 		)
 	}
+}
+
+// loggedPath is the path written to the access log. A capability URL carries
+// its secret in the path, so it is logged as its route template, or as its
+// prefix when no route matched; its query string is dropped.
+func loggedPath(c *gin.Context, capabilities *capabilityPrefixes) string {
+	if c.GetBool(capabilityRequestKey) && c.FullPath() != "" {
+		return c.FullPath()
+	}
+	if prefix := capabilities.match(c.Request.URL.Path); prefix != "" {
+		return prefix + "/…"
+	}
+	path := c.Request.URL.Path
+	if raw := c.Request.URL.RawQuery; raw != "" {
+		path += "?" + raw
+	}
+	return path
 }
 
 func disableClientCache(c *gin.Context) {
@@ -90,7 +103,15 @@ type HTTPRemoteUserConfig struct {
 
 // RouterOptions holds global HTTP server configuration shared across all domains.
 type RouterOptions struct {
-	PublicAccess            bool                     // Whether the wiki allows public read access
+	// PublicAccess is the current "public mode" state (anonymous read access to
+	// every page), read per request so it can be toggled at runtime with no
+	// restart. nil is treated as a fixed-false provider. See internal/publicaccess.
+	PublicAccess publicaccess.Provider
+	// AlwaysShowToc is the current "always show table of contents" state
+	// (show the TOC panel/dropdown regardless of heading count), read per
+	// request so it can be toggled at runtime with no restart. nil is
+	// treated as a fixed-false provider. See internal/tocdisplay.
+	AlwaysShowToc           tocdisplay.Provider
 	EditorLimit             int                      // Max admin+editor users allowed; 0 = unlimited
 	InjectCodeInHeader      string                   // Raw HTML/JS code to inject into the <head> tag
 	CustomStylesheet        string                   // Path to a custom CSS file (resolved by wiki before passing)
@@ -105,7 +126,9 @@ type RouterOptions struct {
 	EnableLinkRefactor      bool                     // Whether the link refactoring feature is enabled in the frontend
 	EnableAPIKeyManagement  bool                     // Whether the experimental API key management feature is enabled
 	Metrics                 *httpmetrics.HTTPMetrics // Optional Prometheus HTTP metrics collector; nil disables request instrumentation
-	GitBackupEnabled        bool                     // Whether git backup is enabled (surfaced to admin UI via /api/config)
+	GitBackupEnabled        bool                     // Whether git backup is currently running (surfaced to admin UI via /api/config)
+	GitBackupEnvManaged     bool                     // Whether git backup is configured via flags/env (settings UI is status-only); surfaced via /api/config
+	GitBackupConfigured     bool                     // Whether git backup is set up at all (running, env-managed, booting, or boot-failed); drives the header health indicator
 	SnapshotEnabled         bool                     // Whether full-backup (snapshot) is enabled (surfaced to admin UI via /api/config)
 	SMTPEnabled             bool                     // Whether SMTP (password reset / user invite email) is configured (surfaced to UI via /api/config)
 	TOTPAvailable           bool                     // Whether a TOTP encryption key is configured, i.e. TOTP self-service can be offered (surfaced to UI via /api/config)
@@ -130,6 +153,12 @@ type FrontendConfig struct {
 	CustomStylesheetPath string
 	// StorageDir is used to validate that CustomStylesheet in RouterOptions is within the storage dir.
 	StorageDir string
+	// ShellResponders may answer SPA requests instead of the shell; the first
+	// that handles a request wins. See shell.go for the contract.
+	ShellResponders []ShellResponder
+	// ShellContributors add title, head and body markup to the SPA shell, in
+	// this order, before the built-in custom stylesheet and InjectCodeInHeader.
+	ShellContributors []ShellContributor
 }
 
 // NewRouter creates the HTTP engine, builds the shared RouterContext, delegates all
@@ -137,6 +166,14 @@ type FrontendConfig struct {
 func NewRouter(registrars []RouteRegistrar, frontendCfg FrontendConfig, opts RouterOptions) *gin.Engine {
 	if opts.MaxAssetUploadSizeBytes <= 0 {
 		opts.MaxAssetUploadSizeBytes = assets.DefaultMaxUploadSizeBytes
+	}
+
+	if opts.PublicAccess == nil {
+		opts.PublicAccess = publicaccess.Fixed(false)
+	}
+
+	if opts.AlwaysShowToc == nil {
+		opts.AlwaysShowToc = tocdisplay.Fixed(false)
 	}
 
 	if Environment == "production" {
@@ -151,9 +188,10 @@ func NewRouter(registrars []RouteRegistrar, frontendCfg FrontendConfig, opts Rou
 	authCookies := auth_middleware.NewAuthCookies(opts.AllowInsecure, opts.AccessTokenTimeout, opts.RefreshTokenTimeout)
 	csrfCookie := security.NewCSRFCookie(opts.AllowInsecure, 3*24*time.Hour)
 
+	capabilities := &capabilityPrefixes{}
 	engine := gin.New()
 	if !opts.DisableRequestLog {
-		engine.Use(slogRequestLogger())
+		engine.Use(slogRequestLogger(capabilities))
 	}
 	if opts.Metrics != nil {
 		engine.Use(opts.Metrics.Middleware())
@@ -182,9 +220,10 @@ func NewRouter(registrars []RouteRegistrar, frontendCfg FrontendConfig, opts Rou
 		// exactly as powerful as role(user) ∩ role(key) everywhere the normal
 		// RequireAuth/RequireAdmin/RequireEditorOrAdmin guards apply — the
 		// same way roles work everywhere else in the app — rather than being
-		// restricted to a curated subset of read routes. Writes are, for now,
-		// separately blocked for Bearer callers by CSRFMiddleware (see
-		// InjectAPIKeyUser's doc comment).
+		// restricted to a curated subset of read routes. CSRFMiddleware skips
+		// requests with a resolved key, so writes follow the same role guards;
+		// routes that manage credentials, sessions or users opt out with
+		// RequireCookieSession (see InjectAPIKeyUser's doc comment).
 		base.Use(auth_middleware.InjectAPIKeyUser(auth_middleware.APIKeyConfig{
 			Service: opts.APIKeyService,
 			// Only failed attempts count toward the limit (NotifyResult
@@ -196,11 +235,12 @@ func NewRouter(registrars []RouteRegistrar, frontendCfg FrontendConfig, opts Rou
 	}
 
 	ctx := RouterContext{
-		Engine:      engine,
-		Base:        base,
-		AuthCookies: authCookies,
-		CSRFCookie:  csrfCookie,
-		Opts:        opts,
+		Engine:       engine,
+		Base:         base,
+		AuthCookies:  authCookies,
+		CSRFCookie:   csrfCookie,
+		Opts:         opts,
+		capabilities: capabilities,
 	}
 
 	for _, r := range registrars {
@@ -222,7 +262,7 @@ func NewRouter(registrars []RouteRegistrar, frontendCfg FrontendConfig, opts Rou
 	// Serve custom stylesheet if a valid path was provided.
 	if customStylesheetPath != "" {
 		cssPath := customStylesheetPath
-		base.GET("/custom.css", func(c *gin.Context) {
+		base.Match(GetAndHead, "/custom.css", func(c *gin.Context) {
 			if _, err := os.Stat(cssPath); os.IsNotExist(err) {
 				c.Status(http.StatusNotFound)
 				return
@@ -236,7 +276,8 @@ func NewRouter(registrars []RouteRegistrar, frontendCfg FrontendConfig, opts Rou
 		})
 	}
 
-	// Serve the embedded frontend SPA on all unknown routes.
+	// Unknown routes: shell responders, then the embedded SPA shell (see shell.go).
+	shell := newShellHandler(frontendCfg, opts, customStylesheetPath)
 	if EmbedFrontend == "true" {
 		fsys, err := fs.Sub(frontend, "dist")
 		if err != nil {
@@ -249,74 +290,25 @@ func NewRouter(registrars []RouteRegistrar, frontendCfg FrontendConfig, opts Rou
 
 		base.StaticFS("/static", http.FS(staticFS))
 
-		base.GET("/favicon.svg", func(c *gin.Context) {
+		base.Match(GetAndHead, "/favicon.svg", func(c *gin.Context) {
 			disableClientCache(c)
 			// favicon is served by the branding registrar if a custom one exists;
 			// fall back to the default leaf SVG.
 			c.Data(http.StatusOK, "image/svg+xml", []byte(DefaultFaviconSVG))
 		})
 
-		engine.NoRoute(func(c *gin.Context) {
-			path := c.Request.URL.Path
-			if opts.BasePath != "" {
-				if path != opts.BasePath && !strings.HasPrefix(path, opts.BasePath+"/") {
-					c.String(http.StatusNotFound, "Page not found")
-					return
-				}
-				path = strings.TrimPrefix(path, opts.BasePath)
-				if path == "" {
-					path = "/"
-				}
-			}
-
-			if c.Request.Method == http.MethodGet &&
-				!strings.HasPrefix(path, "/api") &&
-				!strings.HasPrefix(path, "/assets") &&
-				!strings.HasPrefix(path, "/static") &&
-				!strings.HasPrefix(path, "/branding") {
-
-				c.Writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-				data, err := fs.ReadFile(fsys, "index.html")
-				if err != nil {
-					c.Status(http.StatusNotFound)
-					return
-				}
-
-				siteName := "LeafWiki"
-				if frontendCfg.GetSiteName != nil {
-					if name := frontendCfg.GetSiteName(); name != "" {
-						siteName = name
-					}
-				}
-				faviconFile := ""
-				if frontendCfg.GetFaviconFile != nil {
-					faviconFile = frontendCfg.GetFaviconFile()
-				}
-
-				doc := string(data)
-				escapedBasePath := html.EscapeString(opts.BasePath)
-				doc = strings.ReplaceAll(doc, "{{__SITE_NAME__}}", html.EscapeString(siteName))
-				doc = strings.ReplaceAll(doc, "{{__BASE_PATH__}}", escapedBasePath)
-				doc = strings.ReplaceAll(doc, "{{__FAVICON_HREF__}}", html.EscapeString(BuildFrontendFaviconHref(opts.BasePath, faviconFile)))
-				// Rewrite Vite's relative "./static/" asset references to absolute paths
-				// so they resolve correctly when index.html is served for deep SPA routes.
-				// Lazy chunks still use import.meta.url for their own path resolution.
-				doc = strings.ReplaceAll(doc, `"./static/`, `"`+escapedBasePath+`/static/`)
-
-				doc = injectIntoHead(doc, buildCustomStylesheetTag(opts.BasePath, customStylesheetPath))
-
-				if opts.InjectCodeInHeader != "" {
-					doc = injectIntoHead(doc, opts.InjectCodeInHeader)
-				}
-				c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(doc))
-			} else {
-				c.String(http.StatusNotFound, "Page not found")
-			}
-		})
+		shell.setIndex(fs.ReadFile(fsys, "index.html"))
 	}
+	engine.NoRoute(shell.serve)
 
 	return engine
 }
+
+// GetAndHead registers a route for GET and HEAD. Use it for every non-API GET
+// route outside the reserved prefixes (/api, /assets, /static, /branding):
+// registered for GET only, HEAD falls through to the SPA shell, which answers
+// HEAD like GET with the shell's 200 text/html.
+var GetAndHead = []string{http.MethodGet, http.MethodHead}
 
 func BuildFrontendFaviconHref(basePath, faviconFile string) string {
 	if faviconFile != "" {

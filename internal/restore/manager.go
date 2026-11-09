@@ -274,36 +274,14 @@ func (m *Manager) runFromZipPath(zipPath string, limits coreshared.ExtractionLim
 			return
 		}
 	}
-	if m.cfg.APIKeyService != nil {
-		if err := m.cfg.APIKeyService.PauseForSwap(); err != nil {
+	for _, s := range m.cfg.Stores {
+		if err := s.Store.PauseForSwap(); err != nil {
 			m.cfg.WriteGate.Disengage()
 			if repErr := m.reopenAllStores(); repErr != nil {
-				m.job.FinishNeedsIntervention(fmt.Errorf("failed to release api_keys.db before swap: %w (and failed to recover stores: %v)", err, repErr))
+				m.job.FinishNeedsIntervention(fmt.Errorf("failed to release %s before swap: %w (and failed to recover stores: %v)", s.File, err, repErr))
 				return
 			}
-			m.job.Finish(fmt.Errorf("failed to release api_keys.db before swap: %w", err))
-			return
-		}
-	}
-	if m.cfg.Favorites != nil {
-		if err := m.cfg.Favorites.PauseForSwap(); err != nil {
-			m.cfg.WriteGate.Disengage()
-			if repErr := m.reopenAllStores(); repErr != nil {
-				m.job.FinishNeedsIntervention(fmt.Errorf("failed to release favorites.db before swap: %w (and failed to recover stores: %v)", err, repErr))
-				return
-			}
-			m.job.Finish(fmt.Errorf("failed to release favorites.db before swap: %w", err))
-			return
-		}
-	}
-	if m.cfg.UserSettings != nil {
-		if err := m.cfg.UserSettings.PauseForSwap(); err != nil {
-			m.cfg.WriteGate.Disengage()
-			if repErr := m.reopenAllStores(); repErr != nil {
-				m.job.FinishNeedsIntervention(fmt.Errorf("failed to release usersettings.db before swap: %w (and failed to recover stores: %v)", err, repErr))
-				return
-			}
-			m.job.Finish(fmt.Errorf("failed to release usersettings.db before swap: %w", err))
+			m.job.Finish(fmt.Errorf("failed to release %s before swap: %w", s.File, err))
 			return
 		}
 	}
@@ -367,32 +345,16 @@ func (m *Manager) runFromZipPath(zipPath string, limits coreshared.ExtractionLim
 		}
 	}
 
-	// APIKeyService is nil when API key management is disabled — independent
-	// of AuthService's nil-ness (either can be enabled without the other).
-	if m.cfg.APIKeyService != nil {
-		if err := m.cfg.APIKeyService.Replace(m.cfg.DataDir); err != nil {
-			m.rollbackOrIntervene(sw, fmt.Errorf("failed to reopen api key database: %w", err))
-			return
-		}
-	}
-
-	if m.cfg.Favorites != nil {
-		if err := m.cfg.Favorites.Replace(m.cfg.DataDir); err != nil {
-			m.rollbackOrIntervene(sw, fmt.Errorf("failed to reopen favorites database: %w", err))
-			return
-		}
-	}
-
-	if m.cfg.UserSettings != nil {
-		if err := m.cfg.UserSettings.Replace(m.cfg.DataDir); err != nil {
-			m.rollbackOrIntervene(sw, fmt.Errorf("failed to reopen user settings database: %w", err))
+	for _, s := range m.cfg.Stores {
+		if err := s.Store.Replace(m.cfg.DataDir); err != nil {
+			m.rollbackOrIntervene(sw, fmt.Errorf("failed to reopen %s: %w", s.File, err))
 			return
 		}
 	}
 
 	m.job.SetPhase(PhaseReloadingBranding)
-	if err := m.cfg.BrandingService.Reload(); err != nil {
-		m.rollbackOrIntervene(sw, fmt.Errorf("failed to reload branding: %w", err))
+	if err := m.reloadAll(); err != nil {
+		m.rollbackOrIntervene(sw, fmt.Errorf("failed to reload settings: %w", err))
 		return
 	}
 
@@ -402,6 +364,23 @@ func (m *Manager) runFromZipPath(zipPath string, limits coreshared.ExtractionLim
 		m.cfg.TriggerResync()
 	}
 	m.job.Finish(nil)
+}
+
+// reloadAll re-reads every configured settings.Reloadable (nil-safe, one per
+// entry) from the restored files, accumulating every failure rather than
+// stopping at the first — mirroring reopenAllStores' error-accumulation
+// style below.
+func (m *Manager) reloadAll() error {
+	var errs []error
+	for _, r := range m.cfg.Reloadables {
+		if r == nil {
+			continue
+		}
+		if err := r.Reload(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // rollbackOrIntervene is the shared failure path for every phase after
@@ -456,19 +435,9 @@ func (m *Manager) pauseAllStoresForRollback() {
 			slog.Default().Warn("restore: failed to pause user store before rollback", "error", err)
 		}
 	}
-	if m.cfg.APIKeyService != nil {
-		if err := m.cfg.APIKeyService.PauseForSwap(); err != nil {
-			slog.Default().Warn("restore: failed to pause api key store before rollback", "error", err)
-		}
-	}
-	if m.cfg.Favorites != nil {
-		if err := m.cfg.Favorites.PauseForSwap(); err != nil {
-			slog.Default().Warn("restore: failed to pause favorites store before rollback", "error", err)
-		}
-	}
-	if m.cfg.UserSettings != nil {
-		if err := m.cfg.UserSettings.PauseForSwap(); err != nil {
-			slog.Default().Warn("restore: failed to pause user settings store before rollback", "error", err)
+	for _, s := range m.cfg.Stores {
+		if err := s.Store.PauseForSwap(); err != nil {
+			slog.Default().Warn("restore: failed to pause store before rollback", "file", s.File, "error", err)
 		}
 	}
 }
@@ -498,19 +467,9 @@ func (m *Manager) reopenAllStores() error {
 			}
 		}
 	}
-	if m.cfg.APIKeyService != nil {
-		if err := m.cfg.APIKeyService.Replace(m.cfg.DataDir); err != nil {
-			errs = append(errs, fmt.Errorf("api key store: %w", err))
-		}
-	}
-	if m.cfg.Favorites != nil {
-		if err := m.cfg.Favorites.Replace(m.cfg.DataDir); err != nil {
-			errs = append(errs, fmt.Errorf("favorites store: %w", err))
-		}
-	}
-	if m.cfg.UserSettings != nil {
-		if err := m.cfg.UserSettings.Replace(m.cfg.DataDir); err != nil {
-			errs = append(errs, fmt.Errorf("user settings store: %w", err))
+	for _, s := range m.cfg.Stores {
+		if err := s.Store.Replace(m.cfg.DataDir); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", s.File, err))
 		}
 	}
 	return errors.Join(errs...)

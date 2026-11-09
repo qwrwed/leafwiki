@@ -754,6 +754,57 @@ async function movePageWithRefactorByPath(
   }, input);
 }
 
+// Reads a page through the real API without throwing on non-2xx, so a test can assert
+// the server-side state at a checkpoint and keep it as failure evidence.
+async function readPageByPath(
+  page: import('@playwright/test').Page,
+  path: string,
+): Promise<{ status: number; path: string | null; content: string | null }> {
+  return await page.evaluate(async (targetPath) => {
+    const normalizedPath = targetPath.replace(/^\/+/, '');
+    const response = await fetch(`/api/pages/by-path?path=${encodeURIComponent(normalizedPath)}`, {
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      return { status: response.status, path: null, content: null };
+    }
+
+    const body = (await response.json()) as { path?: string; content?: string };
+    return { status: response.status, path: body.path ?? null, content: body.content ?? null };
+  }, path);
+}
+
+// Holds back the tree response so a test can look at the viewer before the tree store is
+// filled. Only GET <app>/api/tree is gated; everything else, including auth, stays real.
+async function gateTreeResponses(
+  page: import('@playwright/test').Page,
+): Promise<{ release(): void; dispose(): Promise<void> }> {
+  const treePath = toAppPath('/api/tree');
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  const matchesTree = (url: URL) => url.pathname === treePath;
+  await page.route(matchesTree, async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue();
+      return;
+    }
+    await released;
+    await route.continue();
+  });
+
+  return {
+    release,
+    dispose: async () => {
+      release();
+      await page.unroute(matchesTree);
+    },
+  };
+}
+
 async function deletePageByPath(
   page: import('@playwright/test').Page,
   input: { path: string; recursive?: boolean },
@@ -1009,15 +1060,9 @@ async function expectOpenedPageMarkedInNavigationDuringEditMode(
 test.describe('Authenticated', () => {
   test.beforeEach(async ({ page }) => {
     const loginPage = new LoginPage(page);
-    await loginPage.goto();
-    await loginPage.login(user, password);
+    await loginPage.loginViaApi(user, password);
     const viewPage = new ViewPage(page);
     await viewPage.expectUserLoggedIn();
-  });
-
-  test.afterEach(async ({ page }) => {
-    const viewPage = new ViewPage(page);
-    await viewPage.logout();
   });
 
   test('create-page', async ({ page }) => {
@@ -1248,6 +1293,50 @@ test.describe('Authenticated', () => {
     await expect
       .poll(() => getChildPageTitlesByPath(page, parentSlug), { timeout: 15000 })
       .toEqual(desiredOrder);
+  });
+
+  test('section-title-toggles-only-on-an-active-unmodified-click', async ({ page }) => {
+    const stamp = Date.now();
+    const sectionTitle = `Section Title Toggle ${stamp}`;
+    const sectionSlug = `section-title-toggle-${stamp}`;
+
+    await createTopLevelNode(page, {
+      title: sectionTitle,
+      slug: sectionSlug,
+      kind: 'section',
+    });
+    await page.reload();
+    await createChildPagesByPath(page, {
+      parentPath: sectionSlug,
+      titles: [`Section Child ${stamp}`],
+    });
+    await page.reload();
+
+    const treeView = new TreeView(page);
+    await treeView.expectNodeExpanded(sectionTitle, false);
+
+    // Navigation to an inactive section still uses PageViewer's automatic openNode.
+    await treeView.clickNodeTitle(sectionTitle);
+    await expect(page).toHaveURL(new RegExp(`/${sectionSlug}$`));
+    await treeView.expectNodeExpanded(sectionTitle, true);
+
+    await treeView.clickNodeTitle(sectionTitle);
+    await treeView.expectNodeExpanded(sectionTitle, false);
+
+    await treeView.clickNodeChevron(sectionTitle);
+    await treeView.expectNodeExpanded(sectionTitle, true);
+    await treeView.clickNodeChevron(sectionTitle);
+    await treeView.expectNodeExpanded(sectionTitle, false);
+    await treeView.clickNodeTitle(sectionTitle);
+    await treeView.expectNodeExpanded(sectionTitle, true);
+
+    for (const modifier of ['Control', 'Meta', 'Shift', 'Alt'] as const) {
+      await treeView.clickNodeTitle(sectionTitle, { modifiers: [modifier] });
+      await treeView.expectNodeExpanded(sectionTitle, true);
+    }
+
+    await treeView.clickNodeTitle(sectionTitle, { button: 'middle' });
+    await treeView.expectNodeExpanded(sectionTitle, true);
   });
 
   test('copy-markdown-code-block', async ({ page }) => {
@@ -1495,6 +1584,90 @@ Target content`;
         timeout: 5000,
       })
       .toBe('#你好-世界');
+  });
+
+  test('inline code inside a heading stays visible in the viewer', async ({ page }) => {
+    const timestamp = Date.now();
+    const slug = `heading-inline-code-${timestamp}`;
+    const title = `Heading Inline Code ${timestamp}`;
+    const content = `## Config for \`server.port\` value
+
+Body text.`;
+
+    await createPageWithContent(page, { title, slug, content });
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${slug}`);
+
+    const headingCode = page.locator('article h2 code.inline-code');
+    await headingCode.waitFor({ state: 'visible' });
+    await test.expect(headingCode).toHaveText('server.port');
+
+    // Regression: an over-broad `.headline-anchor span` rule used to pull the
+    // inline-code wrapper out of flow (position: absolute; opacity: 0) so the
+    // code only flashed into view — mispositioned — while hovering the heading.
+    const styles = await headingCode.evaluate((el) => {
+      const wrapper = el.closest('.markdown-inline-code') as HTMLElement;
+      const computed = window.getComputedStyle(wrapper);
+      return { opacity: computed.opacity, position: computed.position };
+    });
+    test.expect(styles.opacity).toBe('1');
+    test.expect(styles.position).not.toBe('absolute');
+  });
+
+  // Regression for #1743: inline code kept a fixed 0.75rem inside every
+  // heading, so it stayed 12px next to 36px heading text.
+  test('inline code scales with the heading level', async ({ page }) => {
+    const timestamp = Date.now();
+    const slug = `heading-inline-code-scale-${timestamp}`;
+    const title = `Heading Inline Code Scale ${timestamp}`;
+    const content = [
+      '# `h1 hello` world',
+      '',
+      '## `h2 hello` world',
+      '',
+      '### `h3 hello` world',
+      '',
+      'Body `inline code` text.',
+    ].join('\n');
+
+    await createPageWithContent(page, { title, slug, content });
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${slug}`);
+
+    const measureCode = async (selector: string) => {
+      const container = page
+        .locator(selector)
+        .filter({ has: page.locator('code.inline-code') })
+        .first();
+      await container.waitFor({ state: 'visible' });
+      return container.evaluate((element) => {
+        const code = element.querySelector('code.inline-code') as HTMLElement;
+        return {
+          container: parseFloat(window.getComputedStyle(element).fontSize),
+          code: parseFloat(window.getComputedStyle(code).fontSize),
+        };
+      });
+    };
+
+    const h1 = await measureCode('article h1');
+    const h2 = await measureCode('article h2');
+    const h3 = await measureCode('article h3');
+    const body = await measureCode('article p');
+
+    // The code follows the heading level instead of staying at the body size.
+    test.expect(h1.code).toBeGreaterThan(body.code);
+    test.expect(h1.code).toBeGreaterThan(h2.code);
+    test.expect(h2.code).toBeGreaterThan(h3.code);
+
+    // The same share of the surrounding text at every level, and never bigger.
+    const ratio = (sizes: { container: number; code: number }) => sizes.code / sizes.container;
+    test.expect(ratio(h1)).toBeCloseTo(ratio(h2), 1);
+    test.expect(ratio(h1)).toBeCloseTo(ratio(h3), 1);
+    test.expect(ratio(body)).toBeCloseTo(ratio(h1), 1);
+    test.expect(ratio(h1)).toBeGreaterThanOrEqual(0.7);
+    test.expect(ratio(h1)).toBeLessThan(1);
   });
 
   test('headline hash navigation keeps target below sticky toc', async ({ page }) => {
@@ -2178,6 +2351,35 @@ This paragraph creates a footnote reference.[^leafwiki]
     await expectMainScrollTop(page, 0);
   });
 
+  test('exiting settings returns to the page it was opened from, not the first wiki page', async ({
+    page,
+  }) => {
+    const stamp = Date.now();
+    const originSlug = `exit-origin-${stamp}`;
+    const originTitle = `Exit Origin ${stamp}`;
+
+    await createPageWithContent(page, {
+      title: originTitle,
+      slug: originSlug,
+      content: `# ${originTitle}\n\nOrigin page content`,
+    });
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${originSlug}`);
+
+    // Open Settings the way a user does — from the account menu.
+    await viewPage.clickUserMenuAvatar();
+    await page.getByTestId('user-menu-settings').click();
+    await page.locator('[data-testid="settings-nav"]').waitFor({ state: 'visible' });
+
+    // Leave Settings via the toolbar back button: it must land back on the
+    // page Settings was opened from, not redirect to the first wiki entry.
+    await page.locator('button[data-testid="exit-settings-button"]').click();
+
+    await expect.poll(() => new URL(page.url()).pathname).toBe(`/${originSlug}`);
+    await expect(page.locator('article h1')).toHaveText(originTitle);
+  });
+
   test('duplicate footnote references keep distinct backlinks without leaked node attributes', async ({
     page,
   }) => {
@@ -2223,6 +2425,39 @@ First reference[^leafwiki] and second reference[^leafwiki]
         timeout: 5000,
       })
       .toBe('#user-content-fnref-leafwiki-2');
+  });
+
+  // Regression for #1579: remark-gfm marks task-list items with a
+  // `task-list-item` class, but our own CSS forces `list-disc` on every
+  // `ul li` in this content, so the checkbox rendered alongside a bullet
+  // dot instead of alone.
+  test('task list items render without a bullet marker', async ({ page }) => {
+    const timestamp = Date.now();
+    const slug = `task-list-markers-${timestamp}`;
+    const title = `Task List Markers ${timestamp}`;
+    const content = [
+      '- [ ] Go into an estate that has an amount that would be included in the cheque',
+      '- [ ] Go to banking > Recoverable expenses',
+      '  - [ ] Nested task item',
+    ].join('\n');
+
+    await createPageWithContent(page, { title, slug, content });
+
+    const viewPage = new ViewPage(page);
+    await viewPage.goto(`/${slug}`);
+
+    const taskListItems = page.locator('article li.task-list-item');
+    await taskListItems.first().waitFor({ state: 'visible' });
+    await test.expect(taskListItems).toHaveCount(3);
+
+    const listStyles = await taskListItems.evaluateAll((items) =>
+      items.map((item) => getComputedStyle(item).listStyleType),
+    );
+    for (const listStyleType of listStyles) {
+      test.expect(listStyleType).toBe('none');
+    }
+
+    await test.expect(taskListItems.first().locator('input[type="checkbox"]')).toBeVisible();
   });
 
   test('navigating away from markdown-it sample stays responsive', async ({ page }) => {
@@ -2991,7 +3226,7 @@ Paragraph outside the list.
     await expect(page.locator('.cm-editor')).toBeVisible();
   });
 
-  test('move-page-updates-incoming-links-via-refactor-dialog', async ({ page }) => {
+  test('move-page-updates-incoming-links-via-refactor-api', async ({ page }) => {
     const stamp = Date.now();
     const parentTitle = `incoming-parent-${stamp}`;
     const targetTitle = `incoming-target-${stamp}`;
@@ -3022,6 +3257,10 @@ Paragraph outside the list.
     await editPage.writeContent(`[${targetTitle}](/${parentTitle}/${targetTitle})`);
     await editPage.savePage();
     await editPage.closeEditor();
+
+    const referrerBefore = await readPageByPath(page, referrerTitle);
+    expect(referrerBefore.status).toBe(200);
+    expect(referrerBefore.content).toContain(`[${targetTitle}](/${parentTitle}/${targetTitle})`);
 
     await expect
       .poll(
@@ -3098,15 +3337,88 @@ Paragraph outside the list.
       targetParentPath: '',
       rewriteLinks: true,
     });
-    await page.goto(toAppPath(`/${referrerTitle}`));
-    await expect(page.locator('article').getByRole('link', { name: targetTitle })).toHaveAttribute(
-      'href',
-      toAppPath(`/${targetTitle}`),
-    );
 
-    await page.locator('article').getByRole('link', { name: targetTitle }).click();
-    await expect.poll(() => new URL(page.url()).pathname).toBe(`/${targetTitle}`);
-    await expect(page.locator('article > h1')).toHaveText(targetTitle);
+    const movedTarget = await readPageByPath(page, targetTitle);
+    expect(movedTarget.status).toBe(200);
+    expect(movedTarget.path).toBe(targetTitle);
+    const referrerAfter = await readPageByPath(page, referrerTitle);
+    expect(referrerAfter.status).toBe(200);
+    expect(referrerAfter.content).toContain(`](/${targetTitle})`);
+    expect(referrerAfter.content).not.toContain(`/${parentTitle}/${targetTitle}`);
+
+    try {
+      await page.goto(toAppPath(`/${referrerTitle}`));
+      await expect(
+        page.locator('article').getByRole('link', { name: targetTitle }),
+      ).toHaveAttribute('href', toAppPath(`/${targetTitle}`));
+
+      await page.locator('article').getByRole('link', { name: targetTitle }).click();
+      await expect.poll(() => new URL(page.url()).pathname).toBe(`/${targetTitle}`);
+      await expect(page.locator('article > h1')).toHaveText(targetTitle);
+    } catch (e) {
+      // Test-owned values only: no cookies, headers or credentials
+      const articleHtml = await page
+        .locator('article')
+        .first()
+        .innerHTML({ timeout: 2000 })
+        .catch(() => null);
+      await test.info().attach('incoming-link-evidence.json', {
+        contentType: 'application/json',
+        body: JSON.stringify(
+          {
+            parentTitle,
+            targetTitle,
+            referrerTitle,
+            referrerBefore,
+            movedTarget,
+            referrerAfter,
+            articleHtml,
+            pagePathname: new URL(page.url()).pathname,
+          },
+          null,
+          2,
+        ),
+      });
+      throw e;
+    }
+  });
+
+  test('incoming-link-recovers-after-late-tree-response', async ({ page }) => {
+    const stamp = Date.now();
+    const targetSlug = `late-tree-target-${stamp}`;
+    const targetTitle = targetSlug;
+    const referrerSlug = `late-tree-referrer-${stamp}`;
+
+    await createPageWithContent(page, {
+      title: targetTitle,
+      slug: targetSlug,
+      content: `# ${targetTitle}`,
+    });
+    await createPageWithContent(page, {
+      title: referrerSlug,
+      slug: referrerSlug,
+      content: `[${targetTitle}](/${targetSlug})`,
+    });
+
+    const gate = await gateTreeResponses(page);
+    try {
+      await page.goto(toAppPath(`/${referrerSlug}`));
+      const article = page.locator('article');
+      await expect(article).toContainText(targetTitle);
+      // Without the tree the link cannot be resolved yet, so it must not be a link
+      await expect(article.getByRole('link', { name: targetTitle })).toHaveCount(0);
+      const pathnameBefore = new URL(page.url()).pathname;
+
+      gate.release();
+
+      await expect(article.getByRole('link', { name: targetTitle })).toHaveAttribute(
+        'href',
+        toAppPath(`/${targetSlug}`),
+      );
+      expect(new URL(page.url()).pathname).toBe(pathnameBefore);
+    } finally {
+      await gate.dispose();
+    }
   });
 
   test('copy-page', async ({ page }) => {
@@ -3340,12 +3652,8 @@ Paragraph outside the list.
 
     const searchView = new SearchView(page);
     const accordion = searchView.getTagAccordion();
-    const accordionCount = await accordion.count();
-
-    if (accordionCount === 0) {
-      await expect(accordion).toHaveCount(0);
-      return;
-    }
+    // Re-asserting the 0 here raced with tags loading after the count.
+    if ((await accordion.count()) === 0) return;
 
     await expect(accordion).toBeVisible();
     await page.getByTestId('search-tags-accordion-trigger').click();

@@ -1,21 +1,14 @@
 package links
 
 import (
-	"net/url"
-	"regexp"
 	"strings"
 
+	"github.com/perber/wiki/internal/core/markdown"
 	"github.com/perber/wiki/internal/core/tree"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
 )
-
-// wikiLinkRe matches [[Target]] and [[Target|Alias]] syntax.
-// Capture group 1 is the target (title or path hint).
-// \S as first character rejects bash-style [[ -n ... ]] conditionals (which always
-// start with a space after [[) without affecting real wiki-link titles.
-var wikiLinkRe = regexp.MustCompile(`\[\[(\S[^\]|#\n]*?)(?:\|[^\]\n]+?)?\]\]`)
 
 // wikilinkSentinelPrefix is the to_path prefix used for broken wiki-link
 // records in the link store. It must never collide with real wiki route paths
@@ -37,10 +30,37 @@ func WikilinkTitleFromSentinel(toPath string) string {
 	return strings.TrimPrefix(toPath, wikilinkSentinelPrefix)
 }
 
+// LinkState is the resolution state of a stored link. It is computed on write
+// (source save and title reconcile), never on read.
+type LinkState int
+
+const (
+	// LinkResolved: the target exists and is unique.
+	LinkResolved LinkState = 0
+	// LinkBroken: the target does not exist.
+	LinkBroken LinkState = 1
+	// LinkAmbiguous: a [[Title]] matches several pages. Not broken — it shows
+	// up as a backlink on every matching page.
+	LinkAmbiguous LinkState = 2
+)
+
+// classifyTitleMatches is the single rule mapping the number of pages that
+// match a wiki-link title to a link state.
+func classifyTitleMatches(matches int) LinkState {
+	switch matches {
+	case 0:
+		return LinkBroken
+	case 1:
+		return LinkResolved
+	default:
+		return LinkAmbiguous
+	}
+}
+
 type TargetLink struct {
 	TargetPageID   string
 	TargetPagePath string
-	Broken         bool
+	State          LinkState
 }
 
 var markdownParser = goldmark.New()
@@ -94,18 +114,18 @@ func extractLinksFromMarkdown(content string) []string {
 // [[Target|Alias]] syntax found in content. The returned strings are the raw
 // target values (may be a title or a "Folder/Title" path hint).
 func extractWikiLinksFromMarkdown(content string) []string {
-	excluded := NewMarkdownRefactorEngine().collectExcludedRanges(content)
-	matches := wikiLinkRe.FindAllStringSubmatchIndex(content, -1)
-	if len(matches) == 0 {
+	wikiLinks := markdown.ParseWikiLinks(content)
+	if len(wikiLinks) == 0 {
 		return nil
 	}
-	seen := make(map[string]struct{}, len(matches))
-	targets := make([]string, 0, len(matches))
-	for _, m := range matches {
-		if isExcludedOffset(m[0], excluded) || m[2] == -1 {
+	excluded := NewMarkdownRefactorEngine().collectExcludedRanges(content)
+	seen := make(map[string]struct{}, len(wikiLinks))
+	targets := make([]string, 0, len(wikiLinks))
+	for _, link := range wikiLinks {
+		if isExcludedOffset(link.Start, excluded) {
 			continue
 		}
-		target := strings.TrimSpace(content[m[2]:m[3]])
+		target := link.Target
 		if target == "" {
 			continue
 		}
@@ -128,10 +148,9 @@ func extractWikiLinksFromMarkdown(content string) []string {
 // happens to share a slug path. Only when there is NO title match at all is
 // a slash-containing target retried as a direct route-path lookup
 // ([[Folder/Title]] → /folder/title), which supports nested-path link hints
-// that are not real page titles. An ambiguous title match (N>1) is treated
-// the same as the plain-title case below — broken — rather than falling
-// back to a route-path guess, for consistency: ambiguity is always surfaced
-// as broken, never silently resolved via a different mechanism.
+// that are not real page titles. An ambiguous title match (N>1) is never
+// retried as a route path; it is stored as LinkAmbiguous (see
+// classifyTitleMatches), never silently resolved via a different mechanism.
 func resolveWikiLinkTargets(treeService *tree.TreeService, targets []string) []TargetLink {
 	if !treeService.IsLoaded() || len(targets) == 0 {
 		return nil
@@ -139,61 +158,39 @@ func resolveWikiLinkTargets(treeService *tree.TreeService, targets []string) []T
 
 	var result []TargetLink
 	for _, target := range targets {
-		if strings.Contains(target, "/") {
-			pages := treeService.FindPagesByTitle(target)
-			if len(pages) == 1 {
+		pages := treeService.FindPagesByTitle(target)
+
+		// A slash-containing target with NO title match is retried as a direct
+		// route-path hint ([[Folder/Title]] → /folder/title).
+		if strings.Contains(target, "/") && len(pages) == 0 {
+			routePath := strings.TrimPrefix(target, "/")
+			page, err := treeService.FindPageByRoutePath(routePath)
+			if err == nil && page != nil {
 				result = append(result, TargetLink{
-					TargetPageID:   pages[0].ID,
-					TargetPagePath: wikilinkSentinel(target),
-					Broken:         false,
+					TargetPageID:   page.ID,
+					TargetPagePath: markdown.NormalizeRoutePath(page.CalculatePath()),
+					State:          LinkResolved,
 				})
 				continue
 			}
-			if len(pages) == 0 {
-				// No title matches this exact string — retry as a
-				// route-path hint (e.g. [[some/nested/page]]).
-				routePath := strings.TrimPrefix(target, "/")
-				page, err := treeService.FindPageByRoutePath(routePath)
-				if err == nil && page != nil {
-					result = append(result, TargetLink{
-						TargetPageID:   page.ID,
-						TargetPagePath: normalizeWikiPath(page.CalculatePath()),
-						Broken:         false,
-					})
-					continue
-				}
-				// Store as a normal broken route path so
-				// HealLinksForExactPath can heal it when the page is later
-				// created at that path.
-				result = append(result, TargetLink{
-					Broken:         true,
-					TargetPagePath: "/" + routePath,
-				})
-				continue
-			}
-			// N>1 title matches — ambiguous, same as the plain-title case.
+			// Store as a normal broken route path so
+			// HealLinksForExactPath can heal it when the page is later
+			// created at that path.
 			result = append(result, TargetLink{
-				Broken:         true,
-				TargetPagePath: wikilinkSentinel(target),
+				State:          LinkBroken,
+				TargetPagePath: "/" + routePath,
 			})
 			continue
 		}
 
-		// Pure title-based lookup.
-		pages := treeService.FindPagesByTitle(target)
-		if len(pages) == 1 {
-			result = append(result, TargetLink{
-				TargetPageID:   pages[0].ID,
-				TargetPagePath: wikilinkSentinel(target),
-				Broken:         false,
-			})
-		} else {
-			// 0 matches (not found) or N>1 (ambiguous) → broken sentinel.
-			result = append(result, TargetLink{
-				Broken:         true,
-				TargetPagePath: wikilinkSentinel(target),
-			})
+		link := TargetLink{
+			State:          classifyTitleMatches(len(pages)),
+			TargetPagePath: wikilinkSentinel(target),
 		}
+		if len(pages) == 1 {
+			link.TargetPageID = pages[0].ID
+		}
+		result = append(result, link)
 	}
 	return result
 }
@@ -210,66 +207,6 @@ func collectTargetsFromContent(treeService *tree.TreeService, pagePath string, c
 	return append(mdTargets, wikiResolved...)
 }
 
-// normalizeWikiPath normalizes a wiki path:
-// - removes query/hash (if any)
-// - ensures leading "/"
-// - removes trailing "/" (except root "/")
-func normalizeWikiPath(p string) string {
-	if p == "" {
-		return ""
-	}
-
-	// strip hash/query defensively (caller already does, but keep consistent)
-	if i := strings.Index(p, "#"); i != -1 {
-		p = p[:i]
-	}
-	if i := strings.Index(p, "?"); i != -1 {
-		p = p[:i]
-	}
-
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
-	}
-
-	// collapse multiple slashes
-	for strings.Contains(p, "//") {
-		p = strings.ReplaceAll(p, "//", "/")
-	}
-
-	// strip trailing slash except root
-	if len(p) > 1 {
-		p = strings.TrimRight(p, "/")
-	}
-
-	return p
-}
-
-// resolveURLPath resolves href against currentPath using "page is folder" semantics.
-func resolveURLPath(currentPath, href string) (string, error) {
-	currentPath = normalizeWikiPath(currentPath)
-
-	// treat currentPath as folder by forcing trailing slash
-	folderBase := currentPath
-	if !strings.HasSuffix(folderBase, "/") {
-		folderBase += "/"
-	}
-
-	base, err := url.Parse("https://example.com" + folderBase)
-	if err != nil {
-		return "", err
-	}
-
-	ref, err := url.Parse(href)
-	if err != nil {
-		return "", err
-	}
-
-	resolved := base.ResolveReference(ref)
-
-	// normalize result path (strip trailing slash etc.)
-	return normalizeWikiPath(resolved.Path), nil
-}
-
 func resolveTargetLinks(tree *tree.TreeService, currentPath string, links []string) []TargetLink {
 	if !tree.IsLoaded() {
 		return nil
@@ -283,7 +220,7 @@ func resolveTargetLinks(tree *tree.TreeService, currentPath string, links []stri
 		}
 
 		// resolve link against current path
-		resolvedPath, err := resolveURLPath(currentPath, link)
+		resolvedPath, err := markdown.ResolveFolderRelative(currentPath, link)
 		if err != nil || resolvedPath == "" {
 			continue
 		}
@@ -301,14 +238,14 @@ func resolveTargetLinks(tree *tree.TreeService, currentPath string, links []stri
 			targetLinks = append(targetLinks, TargetLink{
 				TargetPageID:   page.ID,
 				TargetPagePath: resolvedPath,
-				Broken:         false,
+				State:          LinkResolved,
 			})
 		} else {
 			// not found, broken link
 			targetLinks = append(targetLinks, TargetLink{
 				TargetPageID:   "",
 				TargetPagePath: resolvedPath,
-				Broken:         true,
+				State:          LinkBroken,
 			})
 		}
 	}
@@ -367,7 +304,7 @@ func toOutgoingResultItem(tree *tree.TreeService, outgoing Outgoing) OutgoingRes
 	item := OutgoingResultItem{
 		ToPageID:   outgoing.ToPageID,
 		ToPath:     displayPath,
-		Broken:     outgoing.Broken,
+		Broken:     outgoing.State == LinkBroken,
 		FromPageID: outgoing.FromPageID,
 	}
 

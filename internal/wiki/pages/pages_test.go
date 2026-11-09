@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -54,6 +55,11 @@ func newTestDeps(t *testing.T) *testDeps {
 		t.Fatalf("failed to create links store: %v", err)
 	}
 	linkService := links.NewLinkService(storageDir, treeService, linksStore)
+	t.Cleanup(func() {
+		if err := linkService.Close(); err != nil {
+			t.Errorf("failed to close link service: %v", err)
+		}
+	})
 
 	revService := revision.NewService(
 		storageDir, treeService, slog.Default(),
@@ -172,56 +178,41 @@ func TestCreatePageUseCase_HappyPath_WithParent(t *testing.T) {
 	}
 }
 
-func TestCreatePageUseCase_EmptyTitle_ReturnsValidationError(t *testing.T) {
-	deps := newTestDeps(t)
-	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default(), nil)
-
-	_, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1",
-		Title:  "",
-		Slug:   "home",
-		Kind:   pageKind(),
-	})
-	if err == nil {
-		t.Fatal("expected validation error, got nil")
+func TestCreatePageUseCase_InvalidInput_ReturnsError(t *testing.T) {
+	cases := []struct {
+		name                 string
+		input                pages.CreatePageInput
+		wantValidationErrors bool
+	}{
+		{
+			name:                 "EmptyTitle",
+			input:                pages.CreatePageInput{UserID: "user1", Title: "", Slug: "home", Kind: pageKind()},
+			wantValidationErrors: true,
+		},
+		{
+			name:                 "ReservedSlug",
+			input:                pages.CreatePageInput{UserID: "user1", Title: "Reserved", Slug: "e", Kind: pageKind()}, // too short / reserved
+			wantValidationErrors: true,
+		},
+		{
+			name:  "NilKind",
+			input: pages.CreatePageInput{UserID: "user1", Title: "Test", Slug: "test", Kind: nil},
+		},
 	}
-	var ve *sharederrors.ValidationErrors
-	if !errors.As(err, &ve) {
-		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
-	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := newTestDeps(t)
+			uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default(), nil)
 
-func TestCreatePageUseCase_ReservedSlug_ReturnsValidationError(t *testing.T) {
-	deps := newTestDeps(t)
-	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default(), nil)
-
-	_, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1",
-		Title:  "Reserved",
-		Slug:   "e", // too short / reserved
-		Kind:   pageKind(),
-	})
-	if err == nil {
-		t.Fatal("expected error for reserved slug, got nil")
-	}
-	var ve *sharederrors.ValidationErrors
-	if !errors.As(err, &ve) {
-		t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
-	}
-}
-
-func TestCreatePageUseCase_NilKind_ReturnsValidationError(t *testing.T) {
-	deps := newTestDeps(t)
-	uc := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default(), nil)
-
-	_, err := uc.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1",
-		Title:  "Test",
-		Slug:   "test",
-		Kind:   nil,
-	})
-	if err == nil {
-		t.Fatal("expected error for nil kind, got nil")
+			_, err := uc.Execute(context.Background(), tc.input)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			var ve *sharederrors.ValidationErrors
+			if tc.wantValidationErrors && !errors.As(err, &ve) {
+				t.Fatalf("expected ValidationErrors, got %T: %v", err, err)
+			}
+		})
 	}
 }
 
@@ -819,34 +810,146 @@ func TestEnsurePathUseCase_EmptyPath_ReturnsValidationError(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GetPageUseCase
+// GetPageViewByIDUseCase / GetPageViewByPathUseCase
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestGetPageUseCase_HappyPath(t *testing.T) {
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default(), nil)
-	getUC := pages.NewGetPageUseCase(deps.tree)
+type getPageViewCall func(deps *testDeps, page *tree.Page) (*pages.PageView, error)
 
-	created, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Home", Slug: "home", Kind: pageKind(),
-	})
-
-	out, err := getUC.Execute(context.Background(), pages.GetPageInput{ID: created.Page.ID})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if out.Page.ID != created.Page.ID {
-		t.Errorf("expected ID %q, got %q", created.Page.ID, out.Page.ID)
+func getPageViewByID(id string) getPageViewCall {
+	return func(deps *testDeps, _ *tree.Page) (*pages.PageView, error) {
+		return pages.NewGetPageViewByIDUseCase(deps.tree).Execute(context.Background(), pages.GetPageViewByIDInput{ID: id})
 	}
 }
 
-func TestGetPageUseCase_NotFound_ReturnsError(t *testing.T) {
-	deps := newTestDeps(t)
-	getUC := pages.NewGetPageUseCase(deps.tree)
+func getPageViewByPath(routePath string) getPageViewCall {
+	return func(deps *testDeps, _ *tree.Page) (*pages.PageView, error) {
+		return pages.NewGetPageViewByPathUseCase(deps.tree).Execute(context.Background(), pages.GetPageViewByPathInput{RoutePath: routePath})
+	}
+}
 
-	_, err := getUC.Execute(context.Background(), pages.GetPageInput{ID: "nonexistent"})
-	if err == nil {
-		t.Fatal("expected error for non-existent page, got nil")
+// createPageViewFixture creates the page "company"; with metadata it also
+// writes tags and a custom property into its frontmatter.
+func createPageViewFixture(t *testing.T, deps *testDeps, withMetadata bool) *tree.Page {
+	t.Helper()
+	created, err := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default(), nil).
+		Execute(context.Background(), pages.CreatePageInput{
+			UserID: "user1", Title: "Company", Slug: "company", Kind: pageKind(),
+		})
+	if err != nil {
+		t.Fatalf("unexpected error creating page: %v", err)
+	}
+	if !withMetadata {
+		return created.Page
+	}
+	content := "# Company"
+	updated, err := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default(), nil).
+		Execute(context.Background(), pages.UpdatePageInput{
+			UserID: "user1", ID: created.Page.ID, Version: created.Page.Version(),
+			Title: "Company", Slug: "company", Content: &content, Kind: pageKind(),
+			Tags: []string{"alpha", "beta"}, Properties: map[string]string{"status": "published"},
+		})
+	if err != nil {
+		t.Fatalf("unexpected error updating page metadata: %v", err)
+	}
+	return updated.Page
+}
+
+func TestGetPageView_ExistingPage_ReturnsPageWithMetadata(t *testing.T) {
+	tests := []struct {
+		name         string
+		withMetadata bool
+		get          func(page *tree.Page) getPageViewCall
+		wantTags     []string
+		wantProps    map[string]string
+	}{
+		{
+			name:         "by id",
+			withMetadata: true,
+			get:          func(page *tree.Page) getPageViewCall { return getPageViewByID(page.ID) },
+			wantTags:     []string{"alpha", "beta"},
+			// Exact match: leafwiki_* system keys are never properties.
+			wantProps: map[string]string{"status": "published"},
+		},
+		{
+			name:         "by route path",
+			withMetadata: true,
+			get:          func(*tree.Page) getPageViewCall { return getPageViewByPath("company") },
+			wantTags:     []string{"alpha", "beta"},
+			wantProps:    map[string]string{"status": "published"},
+		},
+		{
+			name:      "by id without custom metadata returns empty non-nil values",
+			get:       func(page *tree.Page) getPageViewCall { return getPageViewByID(page.ID) },
+			wantTags:  []string{},
+			wantProps: map[string]string{},
+		},
+		{
+			name:      "by route path without custom metadata returns empty non-nil values",
+			get:       func(*tree.Page) getPageViewCall { return getPageViewByPath("company") },
+			wantTags:  []string{},
+			wantProps: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deps := newTestDeps(t)
+			page := createPageViewFixture(t, deps, tt.withMetadata)
+
+			view, err := tt.get(page)(deps, page)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if view.Page.ID != page.ID {
+				t.Errorf("expected ID %q, got %q", page.ID, view.Page.ID)
+			}
+			if view.Page.Slug != "company" {
+				t.Errorf("expected slug 'company', got %q", view.Page.Slug)
+			}
+			if view.Tags == nil || view.Properties == nil {
+				t.Fatalf("tags and properties must be non-nil, got %#v / %#v", view.Tags, view.Properties)
+			}
+			if !reflect.DeepEqual(view.Tags, tt.wantTags) {
+				t.Errorf("tags = %#v, want %#v", view.Tags, tt.wantTags)
+			}
+			if !reflect.DeepEqual(view.Properties, tt.wantProps) {
+				t.Errorf("properties = %#v, want %#v", view.Properties, tt.wantProps)
+			}
+		})
+	}
+}
+
+func TestGetPageView_MissingPage_ReturnsError(t *testing.T) {
+	tests := []struct {
+		name     string
+		get      getPageViewCall
+		wantErr  error
+		wantCode string
+	}{
+		{name: "by id not found", get: getPageViewByID("nonexistent"), wantErr: tree.ErrPageNotFound},
+		{name: "by id empty", get: getPageViewByID(""), wantCode: pages.ErrCodePageMissingID},
+		{name: "by route path not found", get: getPageViewByPath("does/not/exist"), wantErr: tree.ErrPageNotFound},
+		{name: "by route path empty", get: getPageViewByPath(""), wantCode: pages.ErrCodePageMissingPath},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deps := newTestDeps(t)
+
+			view, err := tt.get(deps, nil)
+			if err == nil {
+				t.Fatalf("expected error, got view %#v", view)
+			}
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Errorf("expected %v, got %v", tt.wantErr, err)
+			}
+			if tt.wantCode != "" {
+				loc, ok := sharederrors.AsLocalizedError(err)
+				if !ok || loc.Code != tt.wantCode {
+					t.Errorf("expected LocalizedError %q, got %v", tt.wantCode, err)
+				}
+			}
+		})
 	}
 }
 
@@ -982,36 +1085,6 @@ func TestDeletePageUseCase_EmptyID_ReturnsError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error when deleting empty page ID, got nil")
-	}
-}
-
-func TestFindByPathUseCase_HappyPath(t *testing.T) {
-	deps := newTestDeps(t)
-	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default(), nil)
-	findUC := pages.NewFindByPathUseCase(deps.tree)
-
-	if _, err := createUC.Execute(context.Background(), pages.CreatePageInput{
-		UserID: "user1", Title: "Company", Slug: "company", Kind: pageKind(),
-	}); err != nil {
-		t.Fatalf("unexpected error creating page: %v", err)
-	}
-
-	out, err := findUC.Execute(context.Background(), pages.FindByPathInput{RoutePath: "company"})
-	if err != nil {
-		t.Fatalf("unexpected error finding page: %v", err)
-	}
-	if out.Page.Slug != "company" {
-		t.Errorf("expected slug 'company', got %q", out.Page.Slug)
-	}
-}
-
-func TestFindByPathUseCase_NotFound_ReturnsError(t *testing.T) {
-	deps := newTestDeps(t)
-	findUC := pages.NewFindByPathUseCase(deps.tree)
-
-	_, err := findUC.Execute(context.Background(), pages.FindByPathInput{RoutePath: "does/not/exist"})
-	if err == nil {
-		t.Fatal("expected error for invalid path, got nil")
 	}
 }
 
@@ -1529,6 +1602,74 @@ func TestApplyPageRefactorUseCase_RenameRewritesIncomingLinks(t *testing.T) {
 	}
 }
 
+// TestApplyPageRefactorUseCase_StaleVersion_LeavesIncomingLinksUntouched tests
+// that a refactor rejected for a stale version changes no other page: incoming
+// links must not point at a path the target never moved to.
+func TestApplyPageRefactorUseCase_StaleVersion_LeavesIncomingLinksUntouched(t *testing.T) {
+	cases := []struct {
+		name  string
+		input func(target, archive *tree.Page) pages.RefactorPreviewInput
+	}{
+		{"rename", func(target, _ *tree.Page) pages.RefactorPreviewInput {
+			return pages.RefactorPreviewInput{
+				PageID: target.ID, Kind: pages.RefactorKindRename, Title: "Renamed", Slug: "renamed", Content: &target.Content,
+			}
+		}},
+		{"move", func(target, archive *tree.Page) pages.RefactorPreviewInput {
+			return pages.RefactorPreviewInput{PageID: target.ID, Kind: pages.RefactorKindMove, NewParentID: &archive.ID}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := newTestDeps(t)
+			createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default(), nil)
+			updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default(), nil)
+			applyUC := pages.NewApplyPageRefactorUseCase(deps.tree, deps.slug, deps.revision, deps.links, slog.Default(), nil)
+
+			target, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+				UserID: "system", Title: "Target", Slug: "target", Kind: pageKind(),
+			})
+			archive, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+				UserID: "system", Title: "Archive", Slug: "archive", Kind: pageKind(),
+			})
+			source, _ := createUC.Execute(context.Background(), pages.CreatePageInput{
+				UserID: "system", Title: "Source", Slug: "source", Kind: pageKind(),
+			})
+			content := "[Target](/target)"
+			if _, err := updateUC.Execute(context.Background(), pages.UpdatePageInput{
+				UserID: "system", ID: source.Page.ID, Version: source.Page.Version(), Title: source.Page.Title, Slug: source.Page.Slug, Content: &content, Kind: pageKind(),
+			}); err != nil {
+				t.Fatalf("UpdatePage(source) failed: %v", err)
+			}
+
+			_, err := applyUC.Execute(context.Background(), pages.RefactorApplyInput{
+				UserID:               "system",
+				Version:              "stale-version",
+				RefactorPreviewInput: tc.input(target.Page, archive.Page),
+				RewriteLinks:         true,
+			})
+			if !errors.Is(err, tree.ErrVersionConflict) {
+				t.Fatalf("expected tree.ErrVersionConflict, got %v", err)
+			}
+
+			sourcePage, err := deps.tree.GetPage(source.Page.ID)
+			if err != nil {
+				t.Fatalf("GetPage(source) failed: %v", err)
+			}
+			if sourcePage.Content != content {
+				t.Fatalf("source content = %q, want %q", sourcePage.Content, content)
+			}
+			targetPage, err := deps.tree.GetPage(target.Page.ID)
+			if err != nil {
+				t.Fatalf("GetPage(target) failed: %v", err)
+			}
+			if targetPage.CalculatePath() != "/target" {
+				t.Fatalf("target path = %q, want /target", targetPage.CalculatePath())
+			}
+		})
+	}
+}
+
 func TestApplyPageRefactorUseCase_RenameRewritesTitleBasedWikiLinks(t *testing.T) {
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default(), nil)
@@ -1636,7 +1777,7 @@ func TestPreviewPageRefactorUseCase_Rename_ExcludesAmbiguousSentinelPagesFromPre
 	// preview, because:
 	//   a) it is ambiguous and cannot be auto-updated
 	//   b) after the rename only one "Grafana" page remains, so
-	//      HealWikiLinksForTitleIfUnambiguous will resolve it automatically.
+	//      ReconcileTitle will resolve it automatically.
 	deps := newTestDeps(t)
 	createUC := pages.NewCreatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default(), nil)
 	updateUC := pages.NewUpdatePageUseCase(deps.tree, deps.slug, deps.orchestrator(), slog.Default(), nil)
@@ -2223,8 +2364,8 @@ func TestDeletePageUseCase_SingleDelete_HealsSentinelWhenDuplicateTitleRemoved(t
 	if err != nil {
 		t.Fatalf("GetOutgoingLinksForPage: %v", err)
 	}
-	if out.Count != 1 || !out.Outgoings[0].Broken {
-		t.Fatalf("precondition: expected broken sentinel, got %+v", out)
+	if out.Count != 1 || out.Outgoings[0].Broken || out.Outgoings[0].ToPageID != "" {
+		t.Fatalf("precondition: expected ambiguous (unresolved) sentinel, got %+v", out)
 	}
 
 	// Delete kafka1 → only kafka2 remains → sentinel should be healed.
@@ -2296,8 +2437,8 @@ func TestDeletePageUseCase_Recursive_HealsSentinelWhenDuplicateTitleRemoved(t *t
 	if err != nil {
 		t.Fatalf("GetOutgoingLinksForPage: %v", err)
 	}
-	if out.Count != 1 || !out.Outgoings[0].Broken {
-		t.Fatalf("precondition: expected broken sentinel, got %+v", out)
+	if out.Count != 1 || out.Outgoings[0].Broken || out.Outgoings[0].ToPageID != "" {
+		t.Fatalf("precondition: expected ambiguous (unresolved) sentinel, got %+v", out)
 	}
 
 	// Delete the whole section (contains kafka1) → kafka2 remains → sentinel healed.
@@ -2334,7 +2475,7 @@ func TestDeletePageUseCase_Recursive_HealsSentinelWhenDuplicateTitleRemoved(t *t
 //
 // Critical setup: [[Kafka]] must be written BEFORE the kafka page exists so it
 // is stored as a broken sentinel (to_path="wikilink:Kafka"). Only then does
-// healing via HealWikiLinksForPage produce a healed sentinel (broken=0,
+// reconciling via ReconcileTitle produce a healed sentinel (broken=0,
 // to_page_id=kafka1, to_path="wikilink:Kafka").
 func TestDeletePageUseCase_Recursive_MarksHealedWikiLinkSentinelBroken(t *testing.T) {
 	deps := newTestDeps(t)
@@ -2357,7 +2498,7 @@ func TestDeletePageUseCase_Recursive_MarksHealedWikiLinkSentinelBroken(t *testin
 		t.Fatalf("UpdatePage source: %v", err)
 	}
 
-	// Step 2: create kafka1 inside a section → HealWikiLinksForPage heals the sentinel
+	// Step 2: create kafka1 inside a section → ReconcileTitle resolves the sentinel
 	// to broken=0, to_page_id=kafka1, to_path="wikilink:Kafka" (not the route path).
 	section, err := createUC.Execute(context.Background(), pages.CreatePageInput{
 		UserID: "system", Title: "Section", Slug: "section", Kind: pageKind(),

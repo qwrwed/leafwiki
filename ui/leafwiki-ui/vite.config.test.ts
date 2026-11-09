@@ -12,7 +12,11 @@ vi.mock('child_process', async (importOriginal) => {
   }
 })
 
-import { resolveAppVersion } from './vite.config'
+import {
+  chunkFileName,
+  resolveAppVersion,
+  stripDevShellBody,
+} from './vite.config'
 
 describe('resolveAppVersion', () => {
   const originalAppVersion = process.env.APP_VERSION
@@ -34,5 +38,34 @@ describe('resolveAppVersion', () => {
     process.env.APP_VERSION = 'v9.9.9-test'
 
     expect(resolveAppVersion()).toBe('v9.9.9-test')
+  })
+})
+
+describe('chunkFileName', () => {
+  it('never emits a file name starting with "_" or "."', () => {
+    // Go's //go:embed skips files starting with "_" or "." when embedding a
+    // directory, so such a chunk (e.g. mermaid's lodash "_baseUniq") would
+    // 404 at runtime and break the lazy import that depends on it.
+    expect(chunkFileName({ name: '_baseUniq' })).toBe('static/baseUniq-[hash].js')
+    expect(chunkFileName({ name: '.hidden' })).toBe('static/hidden-[hash].js')
+  })
+
+  it('leaves regular chunk names untouched', () => {
+    expect(chunkFileName({ name: 'codemirror' })).toBe(
+      'static/codemirror-[hash].js',
+    )
+  })
+})
+
+describe('stripDevShellBody', () => {
+  it('empties #root in the dev server, where Go does not fill the shell', () => {
+    // The Go server replaces {{__BODY__}} with contributed markup; the Vite
+    // dev server serves index.html as is, so the placeholder would flash as
+    // text until React mounts.
+    expect(
+      stripDevShellBody(
+        '<title>{{__PAGE_TITLE__}}</title><div id="root">{{__BODY__}}</div>',
+      ),
+    ).toBe('<title>{{__PAGE_TITLE__}}</title><div id="root"></div>')
   })
 })

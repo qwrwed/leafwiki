@@ -5,15 +5,25 @@ RELEASE_DIR := releases
 DOCKER_BUILDER := Dockerfile.builder
 UI_DIR := ui/leafwiki-ui
 HTTP_DIST := internal/http/dist
+# Single source for the golangci-lint version; the lint-go job in
+# .github/workflows/backend.yml reads the same file.
+GOLANGCI_LINT_VERSION ?= $(shell cat .golangci-lint-version)
+# golang.org/x/tools release for `make deadcode` (not a go.mod dependency).
+DEADCODE_VERSION ?= v0.52.0
 EMBED_LDFLAGS := -X github.com/perber/wiki/internal/http.EmbedFrontend=true -X github.com/perber/wiki/internal/http.Environment=production
 LDFLAGS := -X main.Version=$(VERSION) $(EMBED_LDFLAGS)
 
 PLATFORMS := \
   linux/amd64 \
+  linux/386 \
   linux/arm64 \
   windows/amd64 \
   darwin/amd64 \
   darwin/arm64
+
+# Release targets other than linux, checked by `make cross` (and in CI) so a
+# platform-specific compile error doesn't first show up at the release tag.
+CROSS_PLATFORMS ?= windows/amd64 darwin/arm64
 
 all: build
 
@@ -29,14 +39,39 @@ ui:
 
 # Self-contained binary with embedded UI (matches release/Docker builds).
 build: ui
-	go build -ldflags "$(LDFLAGS)" -o $(BINARY_NAME) $(CMD_DIR)
+	go build -trimpath -tags nomsgpack -ldflags "$(LDFLAGS)" -o $(BINARY_NAME) $(CMD_DIR)
 
 # API-only binary for local Vite-proxied development (no embedded SPA).
 build-api:
 	go build -ldflags "-X main.Version=$(VERSION)" -o $(BINARY_NAME) $(CMD_DIR)
 
+# npm dependencies for the frontend (ui-deps) and the e2e tests. Install
+# scripts stay off, like in CI and `make ui`.
+setup: ui-deps
+	cd e2e && npm ci --ignore-scripts
+
+# Only for running the E2E suites locally (make run-e2e-local); Chromium is
+# the browser the suites use. On Linux, `npx playwright install-deps chromium`
+# in e2e/ adds missing system libraries (needs sudo).
+setup-e2e: setup
+	cd e2e && npx playwright install chromium
+
+# Toolchain versions against .nvmrc and go.mod; exits 1 on a missing tool or
+# the wrong Node major.
+doctor:
+	@./scripts/doctor.sh
+
+# Backend and Vite dev server together; Ctrl-C stops both. ARGS go to the
+# backend.
+dev:
+	@./scripts/dev.sh $(ARGS)
+
 run:
 	go run -ldflags "-X main.Version=$(VERSION)" $(CMD_DIR)
+
+# Regenerate the experimental Swagger 2.0 spec in docs/api (pinned swag, not a go.mod dependency).
+api-docs:
+	go run github.com/swaggo/swag/cmd/swag@v1.16.6 init --generalInfo api_docs.go --dir ./cmd/leafwiki,./internal --parseInternal --requiredByDefault --output ./docs/api --outputTypes json,yaml
 
 clean:
 	rm -f $(BINARY_NAME)
@@ -45,8 +80,68 @@ clean:
 test:
 	go test ./...
 
+# Built with the toolchain from go.mod, so the result matches CI.
+lint:
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run
+
+# Functions no main or test can reach (#1766). deadcode exits 0 even when it
+# finds something, so any output fails the target. -test counts test-only
+# helpers as used. It analyses the host platform only: a function called
+# solely from another GOOS's files would be reported here.
+deadcode:
+	@out=$$(go run golang.org/x/tools/cmd/deadcode@$(DEADCODE_VERSION) -test ./...) || exit 1; \
+	if [ -n "$$out" ]; then echo "$$out"; echo "Unreachable functions found; remove them."; exit 1; fi
+
+# Frontend checks, in two halves so CI can run them as parallel jobs
+# (.github/workflows/frontend.yml); ui-check runs both.
+ui-deps:
+	cd $(UI_DIR) && npm ci --ignore-scripts
+
+ui-lint: ui-deps
+	cd $(UI_DIR) && npm run lint -- --max-warnings=0 && npm run format:check
+
+# `npm run build` is the type check (tsc -b).
+ui-test: ui-deps
+	cd $(UI_DIR) && npm test && npm run build
+
+ui-check: ui-lint ui-test
+
+# The local subset of the pull-request checks. Not included: the linux/386
+# tests, govulncheck, Trivy (the dependency scans, and the image scan, which
+# `make scan-image` runs locally with Docker and trivy installed), the
+# install-script test, the e2e lint, the E2E suites and the Dev Container
+# build (.github/workflows/devcontainer.yml).
+# CI jobs that keep their own command: test-go (go test with coverage for the
+# report artifact), lint-go (golangci-lint-action, for PR annotations and its
+# cache) and the e2e lint (npm in e2e/, which has no Make target).
+ci: verify lint deadcode test cross ui-check
+
 bench:
 	go test -bench=. -benchmem -benchtime=3s ./internal/links/... ./internal/core/revision/...
+
+# Build and vet (which also type-checks _test.go files) for each of
+# CROSS_PLATFORMS, without cgo, like the release builds.
+cross:
+	@for platform in $(CROSS_PLATFORMS); do \
+	  goos=$${platform%/*}; goarch=$${platform#*/}; \
+	  echo "Building and vetting for $$goos/$$goarch..."; \
+	  CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch go build ./... || exit 1; \
+	  CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch go vet ./... || exit 1; \
+	done
+
+# Small repository checks that need neither Go nor Node; CI runs the same
+# target (.github/workflows/verify.yml).
+verify:
+	./scripts/check-private-references.sh
+	./scripts/check-toolchain-versions.sh
+	./scripts/check-toolchain-versions.test.sh
+	./scripts/changelog.test.sh
+
+# Conventional Commit subjects for BASE..HEAD; CI runs the same script
+# (.github/workflows/commit-messages.yml).
+BASE ?= origin/main
+verify-commits:
+	./scripts/check-commit-messages.sh "$(BASE)..HEAD"
 
 # Build all platform targets
 release: $(PLATFORMS)
@@ -70,21 +165,52 @@ $(PLATFORMS):
 	 docker cp $$ID:/out/$(BINARY_NAME) $(RELEASE_DIR)/$$OUTPUT ; \
 	 docker rm $$ID ; \
 	 echo "✅ Binary done: $(RELEASE_DIR)/$$OUTPUT" ; \
-	 sha256sum $(RELEASE_DIR)/$$OUTPUT > $(RELEASE_DIR)/$$OUTPUT.sha256 ; \
+	 (cd $(RELEASE_DIR) && sha256sum $$OUTPUT > $$OUTPUT.sha256) ; \
 	 zip -j $(RELEASE_DIR)/$$OUTPUT.zip $(RELEASE_DIR)/$$OUTPUT ; \
 	 tar -czf $(RELEASE_DIR)/$$OUTPUT.tar.gz -C $(RELEASE_DIR) $$OUTPUT ; \
 	 echo "📦 Compressed: zip and tar.gz"
+
+# Build inputs of the production image that don't depend on the platform.
+# docker-build-publish and scan-image share them, so the release scan checks
+# the image that gets pushed and the push reuses the scan's BuildKit cache.
+IMAGE_BUILD_FLAGS = --file Dockerfile --target final --build-arg APP_VERSION=$(VERSION)
+
+# Trivy settings shared by the image scans: fail only on HIGH/CRITICAL
+# findings that have a fix; .trivyignore holds the accepted false positives.
+TRIVY_IMAGE_FLAGS = --severity HIGH,CRITICAL --ignore-unfixed --ignorefile .trivyignore
+
+require-trivy:
+	@command -v trivy >/dev/null 2>&1 || { echo "trivy is not installed: https://trivy.dev/latest/getting-started/installation/"; exit 1; }
+
+# Build the final image for one platform, load it into Docker and scan it.
+# CI runs it on PRs that touch the image inputs
+# (.github/workflows/image-scan.yml) and in the release workflow before the
+# push, once per platform.
+SCAN_PLATFORM ?= linux/amd64
+SCAN_TAG ?= leafwiki:scan
+scan-image: require-trivy
+	docker buildx build $(IMAGE_BUILD_FLAGS) --platform $(SCAN_PLATFORM) --load --tag $(SCAN_TAG) .
+	trivy image --image-src docker --platform $(SCAN_PLATFORM) $(TRIVY_IMAGE_FLAGS) \
+		--exit-code 1 $(SCAN_TAG)
+
+# Scan the published image straight from the registry (--image-src remote, so
+# a stale local copy with another platform isn't scanned instead). The weekly
+# CI run (.github/workflows/image-scan.yml) calls it twice: once with
+# TRIVY_EXIT_CODE=0 and SARIF output for code scanning, once as the gate.
+SCAN_IMAGE ?= ghcr.io/perber/leafwiki:latest
+TRIVY_EXIT_CODE ?= 1
+TRIVY_EXTRA_FLAGS ?=
+scan-published-image: require-trivy
+	trivy image --image-src remote --platform $(SCAN_PLATFORM) $(TRIVY_IMAGE_FLAGS) \
+		--exit-code $(TRIVY_EXIT_CODE) $(TRIVY_EXTRA_FLAGS) $(SCAN_IMAGE)
 
 # Final production Docker image
 docker-build-publish:
 ifndef REPO_OWNER
 	$(error REPO_OWNER is not set. Usage: make docker-build-publish VERSION=vX.Y.Z REPO_OWNER=your_github_username)
 endif
-	docker buildx build \
+	docker buildx build $(IMAGE_BUILD_FLAGS) \
 		--platform linux/amd64,linux/arm64 \
-		--file Dockerfile \
-		--target final \
-		--build-arg APP_VERSION=$(VERSION) \
 		--tag ghcr.io/$(REPO_OWNER)/leafwiki:$(VERSION) \
 		--tag ghcr.io/$(REPO_OWNER)/leafwiki:latest \
 		--annotation "index:org.opencontainers.image.title=LeafWiki" \
@@ -122,13 +248,28 @@ run-e2e-local-fast:
 
 help:
 	@echo "Available commands:"
+	@echo "  make setup                – Install npm dependencies (frontend and e2e)"
+	@echo "  make setup-e2e            – make setup plus the Playwright browser for local E2E runs"
+	@echo "  make doctor               – Show Go, Node, npm and mise versions; check them against go.mod and .nvmrc"
+	@echo "  make dev                  – Run backend and Vite dev server together (http://localhost:5173)"
+	@echo "                              Optional: ARGS=\"<backend flags>\""
 	@echo "  make build                – Build self-contained binary with embedded UI (needs Node.js)"
 	@echo "  make build-api            – Build API-only binary (use with Vite in Dev Setup)"
 	@echo "  make ui                   – Build frontend into internal/http/dist for embedding"
 	@echo "  make release              – Cross-compile binaries for all platforms (via Docker)"
 	@echo "  make clean                – Clean all generated files"
+	@echo "  make api-docs             – Regenerate the experimental Swagger spec in docs/api"
 	@echo "  make test                 – Run all Go tests"
+	@echo "  make lint                 – Run golangci-lint (version from .golangci-lint-version)"
+	@echo "  make ui-check             – Frontend install, lint, format check, tests and build"
+	@echo "                              (ui-lint and ui-test run the two halves)"
+	@echo "  make ci                   – verify, lint, deadcode, test, cross and ui-check, like CI"
+	@echo "  make deadcode             – Fail on Go functions no main or test reaches"
+	@echo "  make verify               – Run small repository checks (private references, toolchain versions)"
+	@echo "  make verify-commits       – Check commit subjects since BASE (default origin/main)"
 	@echo "  make bench                – Run Go benchmarks for links and revision"
+	@echo "  make cross                – Build and vet for windows/amd64 and darwin/arm64"
+	@echo "                              Optional: CROSS_PLATFORMS=\"<goos>/<goarch> ...\""
 	@echo "  make run-e2e              – Run end-to-end tests (using Docker)"
 	@echo "  make run-proxy-e2e        – Run reverse-proxy auth E2E tests (Docker + nginx)"
 	@echo "  make run-e2e-local        – Run end-to-end tests via local fast path"
@@ -136,6 +277,10 @@ help:
 	@echo "                              Optional: GREP=<pattern> to filter tests"
 	@echo "  make run                  – Run development server (API only; use Vite for UI)"
 	@echo "  make docker-build-publish – Build and push multi-arch Docker image"
+	@echo "  make scan-image           – Build the Docker image for one platform and scan it with Trivy"
+	@echo "                              Optional: SCAN_PLATFORM=linux/arm64 SCAN_TAG=<tag>"
+	@echo "  make scan-published-image – Scan the published image (SCAN_IMAGE, default ghcr.io/perber/leafwiki:latest) with Trivy"
+	@echo "                              Optional: SCAN_PLATFORM, TRIVY_EXIT_CODE, TRIVY_EXTRA_FLAGS"
 	@echo "  make changelog            – Generate changelog"
 
-.PHONY: all build build-api ui run clean test bench fmt lint help docker-build-publish changelog run-e2e run-e2e-local run-e2e-local-fast run-proxy-e2e
+.PHONY: all build build-api ui setup setup-e2e doctor dev run api-docs clean test lint deadcode ui-deps ui-lint ui-test ui-check ci bench cross verify verify-commits help docker-build-publish require-trivy scan-image scan-published-image changelog run-e2e run-e2e-local run-e2e-local-fast run-proxy-e2e
