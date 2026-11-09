@@ -31,7 +31,7 @@
     "namePlaceholder": "z. B. research-agent",
     "userPlaceholder": "Besitzenden Benutzer auswählen",
     "expiresLabel": "Läuft ab am (optional)",
-    "roleHelper": "Neue Schlüssel sind vorerst Betrachter (nur Lesezugriff).",
+    "roleHelper": "Ein Schlüssel hat nie mehr Rechte als sein Besitzer.",
     "cancel": "Abbrechen",
     "submit": "Erstellen",
     "successToast": "API-Schlüssel erfolgreich erstellt",

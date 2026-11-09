@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import type { CreateApiKeyResult } from '@/lib/api/apikeys'
+import type { ApiKeyRole, CreateApiKeyResult } from '@/lib/api/apikeys'
 import { handleFieldErrors } from '@/lib/handleFieldErrors'
 import { DIALOG_API_KEY_FORM } from '@/lib/registries'
 import { useApiKeyStore } from '@/stores/apikeys'
@@ -18,6 +18,8 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 const DIALOG_INPUT_ALLOWED_HOTKEYS = 'Enter'
+
+const API_KEY_ROLES: ApiKeyRole[] = ['viewer', 'editor', 'admin']
 
 // expiresAt holds a plain "YYYY-MM-DD" from the date input — the user's
 // LOCAL calendar date, with no timezone attached (that's what a date picker
@@ -43,6 +45,7 @@ export function ApiKeyFormDialog() {
   const { t } = useTranslation('apikeys')
   const [name, setName] = useState('')
   const [userId, setUserId] = useState('')
+  const [role, setRole] = useState<ApiKeyRole>('viewer')
   const [expiresAt, setExpiresAt] = useState('')
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
@@ -59,11 +62,9 @@ export function ApiKeyFormDialog() {
       const created = await createApiKey({
         name,
         userId,
-        // Role is intentionally omitted — the create dialog only mints
-        // viewer-scoped keys for now (see Select removal below); the
-        // backend defaults to viewer when role is absent. Editor/admin
-        // roles are accepted by the API for direct use; whether to offer
-        // them in this dialog is a separate product decision.
+        // The backend caps the effective role at the owner's role, so
+        // offering editor/admin here cannot widen what the owner can do.
+        role,
         expiresAt: toExpiresAtRFC3339(expiresAt),
       })
       toast.success(t('create.successToast'))
@@ -170,6 +171,21 @@ export function ApiKeyFormDialog() {
               {users.map((user) => (
                 <SelectItem key={user.id} value={user.id}>
                   {user.username}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={role}
+            onValueChange={(val) => setRole(val as ApiKeyRole)}
+          >
+            <SelectTrigger data-testid="api-key-role-select">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {API_KEY_ROLES.map((r) => (
+                <SelectItem key={r} value={r}>
+                  {t(`role.${r}`)}
                 </SelectItem>
               ))}
             </SelectContent>

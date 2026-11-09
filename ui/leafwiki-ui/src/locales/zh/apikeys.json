@@ -29,7 +29,7 @@
     "namePlaceholder": "如 research-agent",
     "userPlaceholder": "选择所属用户",
     "expiresLabel": "过期时间（可选）",
-    "roleHelper": "新密钥目前默认为查看者（只读）。",
+    "roleHelper": "密钥的权限不会超过其所属用户。",
     "cancel": "取消",
     "submit": "创建",
     "successToast": "API 密钥创建成功",

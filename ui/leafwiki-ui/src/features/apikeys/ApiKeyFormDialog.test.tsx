@@ -118,13 +118,13 @@ describe('ApiKeyFormDialog', () => {
         'lw_ab12cd34_supersecret',
       ),
     )
-    // Role is intentionally omitted from the create call — the dialog only
-    // mints viewer-scoped keys for now (see Fix 6 in the API keys review).
+    // An untouched role picker sends viewer, the least privileged role.
     expect(apiKeyAPI.createApiKey).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'agent key', userId: 'u1' }),
-    )
-    expect(apiKeyAPI.createApiKey).not.toHaveBeenCalledWith(
-      expect.objectContaining({ role: expect.anything() }),
+      expect.objectContaining({
+        name: 'agent key',
+        userId: 'u1',
+        role: 'viewer',
+      }),
     )
 
     await user.click(screen.getByTestId('api-key-secret-copy'))
@@ -134,6 +134,41 @@ describe('ApiKeyFormDialog', () => {
     expect(
       screen.queryByTestId('api-key-form-dialog-button-confirm'),
     ).not.toBeInTheDocument()
+  })
+
+  it('sends the role picked in the role picker', async () => {
+    const user = userEvent.setup()
+    ;(apiKeyAPI.createApiKey as ReturnType<typeof vi.fn>).mockResolvedValue({
+      key: {
+        id: 'k1',
+        name: 'writer key',
+        userId: 'u1',
+        prefix: 'ab12cd34',
+        role: 'editor',
+        createdBy: 'admin1',
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      secret: 'lw_ab12cd34_supersecret',
+    })
+    ;(apiKeyAPI.getApiKeys as ReturnType<typeof vi.fn>).mockResolvedValue([])
+
+    render(<ApiKeyFormDialog />)
+
+    await user.type(
+      screen.getByPlaceholderText('e.g. research-agent'),
+      'writer key',
+    )
+    await user.click(screen.getByTestId('api-key-owner-select'))
+    await user.click(await screen.findByRole('option', { name: 'agent-owner' }))
+    await user.click(screen.getByTestId('api-key-role-select'))
+    await user.click(await screen.findByRole('option', { name: 'Editor' }))
+    await user.click(screen.getByTestId('api-key-form-dialog-button-confirm'))
+
+    await waitFor(() =>
+      expect(apiKeyAPI.createApiKey).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'u1', role: 'editor' }),
+      ),
+    )
   })
 
   it('normalizes a same-day expiry to the end of the local day', async () => {

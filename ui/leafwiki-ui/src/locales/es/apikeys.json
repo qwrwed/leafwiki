@@ -31,7 +31,7 @@
     "namePlaceholder": "p. ej., agente-investigador",
     "userPlaceholder": "Selecciona un usuario propietario",
     "expiresLabel": "expira el (opcional)",
-    "roleHelper": "Por ahora, las claves nuevas son de tipo lector (solo lectura).",
+    "roleHelper": "Una clave nunca tiene más acceso que su propietario.",
     "cancel": "Cancelar",
     "submit": "Crear",
     "successToast": "Clave de API creada correctamente",

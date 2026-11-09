@@ -31,7 +31,7 @@
     "namePlaceholder": "ex. research-agent",
     "userPlaceholder": "Sélectionner un utilisateur propriétaire",
     "expiresLabel": "Date d'expiration (facultatif)",
-    "roleHelper": "Les nouvelles clés sont en lecture seule pour le moment.",
+    "roleHelper": "Une clé n'a jamais plus de droits que son propriétaire.",
     "cancel": "Annuler",
     "submit": "Créer",
     "successToast": "Clé API créée avec succès",

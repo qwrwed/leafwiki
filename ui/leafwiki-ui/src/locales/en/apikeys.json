@@ -31,7 +31,7 @@
     "namePlaceholder": "e.g. research-agent",
     "userPlaceholder": "Select an owning user",
     "expiresLabel": "expires at (optional)",
-    "roleHelper": "New keys are viewer (read-only) for now.",
+    "roleHelper": "A key never has more access than its owner.",
     "cancel": "Cancel",
     "submit": "Create",
     "successToast": "API key created successfully",
