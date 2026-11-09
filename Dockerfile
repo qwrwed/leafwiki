@@ -2,22 +2,24 @@
 # Step 1: Frontend
 FROM node:26-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS frontend-build
 WORKDIR /app
-ARG APP_VERSION
 COPY ./ui/leafwiki-ui/package*.json ./
 RUN npm ci --ignore-scripts
 COPY ./ui/leafwiki-ui/ ./
+# Declared after npm ci: a RUN after an ARG reruns whenever its value changes,
+# and APP_VERSION changes on every commit.
+ARG APP_VERSION
 RUN VITE_API_URL=/ APP_VERSION=${APP_VERSION} npm run build
 
 # Step 2: Backend + Build binary
 FROM golang:1.27.3-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS backend-build
 WORKDIR /app
-ARG APP_VERSION
-ARG DISABLE_REFRESH_TOKEN_RATE_LIMIT=false
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
 	go mod download
 COPY . .
 COPY --from=frontend-build /app/dist ./internal/http/dist
+ARG APP_VERSION
+ARG DISABLE_REFRESH_TOKEN_RATE_LIMIT=false
 # -tags nomsgpack drops gin's unused MessagePack codec (~5MB with -trimpath).
 RUN --mount=type=cache,target=/go/pkg/mod \
 	--mount=type=cache,target=/root/.cache/go-build \
